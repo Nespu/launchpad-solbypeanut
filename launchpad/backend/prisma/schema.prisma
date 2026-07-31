@@ -1,0 +1,56 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Token {
+  id            String   @id @default(cuid())
+  mintAddress   String   @unique
+  name          String
+  symbol        String
+  description   String?
+  imageUrl      String
+  totalSupply   BigInt
+  liquiditySol  Float
+  creatorWallet String
+  createdAt     DateTime @default(now())
+  copiedFrom    String?
+  txHash        String
+  poolAddress   String?
+  status        String   @default("created")
+  
+  // Assets de seguridad
+  lockType      String?  // "temporal" o "quemaTotal"
+  lockDuration  Int?     // Días de bloqueo (ej. 180)
+  lockTxHash    String?  // Hash de la transacción de bloqueo
+  auditStatus   String?  // "verified" o "pending"
+}
+
+model FeePayment {
+  id          String   @id @default(cuid())
+  userWallet  String
+  tokenMint   String   @unique
+  amountSol   Float
+  txHash      String
+  createdAt   DateTime @default(now())
+}
+
+// ============================================================
+// NUEVO: Modelo para registrar retiros de liquidez
+// ============================================================
+
+model Withdrawal {
+  id            String   @id @default(cuid())
+  userWallet    String
+  poolAddress   String
+  lpTokenAmount Float
+  userAmount    Float
+  platformFee   Float
+  status        String   @default("pending") // pending, completed, failed
+  txHash        String?
+  createdAt     DateTime @default(now())
+}

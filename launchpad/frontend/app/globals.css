@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://api.fontshare.com/v2/css?f[]=author@400,500,600,700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600;700;800&family=Martian+Mono:wght@400;500;600;700&display=swap');
+
+body {
+  background: #050608;
+  color: #F2F0EA;
+  font-family: 'Author', sans-serif;
+}
+
+h1, h2, h3, .font-display {
+  font-family: 'Unbounded', sans-serif;
+}
+
+.font-mono {
+  font-family: 'Martian Mono', monospace;
+}
