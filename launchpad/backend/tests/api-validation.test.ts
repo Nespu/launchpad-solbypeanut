@@ -8,7 +8,9 @@ import {
   myPoolsQuerySchema,
   updateWithdrawalResultSchema,
   withdrawLiquiditySchema,
+  submitTransactionSchema,
 } from '../src/utils/schemas';
+import { cleanMetadataText } from '../src/utils/metadataText';
 
 const address = '11111111111111111111111111111111';
 
@@ -55,6 +57,34 @@ test('create token schema rejects invalid addresses, unsafe supply, and duplicat
   assert.equal(createTokenSchema.safeParse({ ...validToken, userWallet: 'invalid' }).success, false);
   assert.equal(createTokenSchema.safeParse({ ...validToken, totalSupply: Number.MAX_SAFE_INTEGER }).success, false);
   assert.equal(createTokenSchema.safeParse({ ...validToken, securityAssets: ['mint', 'mint'] }).success, false);
+});
+
+test('free-text token fields reject null bytes and on-chain metadata cleanup removes every null byte', () => {
+  const createInput = {
+    userWallet: address,
+    name: 'Token',
+    symbol: 'TST',
+    totalSupply: 100,
+    liquiditySol: 1,
+  };
+  assert.equal(createTokenSchema.safeParse({ ...createInput, name: 'To\0ken' }).success, false);
+  assert.equal(createTokenSchema.safeParse({ ...createInput, symbol: 'T\0ST' }).success, false);
+  assert.equal(createTokenSchema.safeParse({ ...createInput, description: 'desc\0ription' }).success, false);
+  assert.equal(createTokenSchema.safeParse({ ...createInput, copyFrom: 'mint\0address' }).success, false);
+
+  const submitInput = {
+    signedTransaction: 'AA==',
+    mintAddress: address,
+    userWallet: address,
+    name: 'Token',
+    symbol: 'TST',
+    imageUrl: 'https://example.com/token.png',
+    totalSupply: 100,
+    liquiditySol: 1,
+  };
+  assert.equal(submitTransactionSchema.safeParse({ ...submitInput, description: 'desc\0ription' }).success, false);
+  assert.equal(submitTransactionSchema.safeParse({ ...submitInput, copyFrom: 'mint\0address' }).success, false);
+  assert.equal(cleanMetadataText('To\0ke\0n\0  '), 'Token');
 });
 
 test('pool and withdrawal schemas only accept positive integer token amounts', () => {

@@ -13,6 +13,20 @@ const AUTHORITIES = [
   { key: 'update', icon: '✏️', name: 'Revoke Update', desc: 'La metadata queda fija para siempre.' },
 ];
 
+type PendingTokenSubmission = {
+  signedTransaction: string;
+  mintAddress: string;
+  userWallet: string;
+  name: string;
+  symbol: string;
+  description: string;
+  imageUrl: string;
+  totalSupply: number;
+  liquiditySol: number;
+};
+
+const EXPIRED_TRANSACTION_MESSAGE = 'La transacción expiró. Vuelve a firmar.';
+
 export default function TokenForm() {
   const { publicKey, signTransaction } = useWallet();
 
@@ -31,6 +45,7 @@ export default function TokenForm() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [pendingSubmission, setPendingSubmission] = useState<PendingTokenSubmission | null>(null);
   const [feeConfig, setFeeConfig] = useState<{ baseFeeSol: number; assetFeeSol: number } | null>(null);
   const [result, setResult] = useState<{ txId: string; mintAddress: string } | null>(null);
   const [goToPool, setGoToPool] = useState(false);
@@ -72,6 +87,36 @@ export default function TokenForm() {
 
   const canNext = step === 0 ? name && symbol : step === 1 ? totalSupply && liquiditySol : true;
 
+  const submitSignedTransaction = async (payload: PendingTokenSubmission) => {
+    const submitRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/submit-transaction`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const submitData = await submitRes.json();
+    if (!submitRes.ok || !submitData.success) {
+      if (submitData.error === EXPIRED_TRANSACTION_MESSAGE) setPendingSubmission(null);
+      const errorId = submitData.errorId ? ` (ID: ${submitData.errorId})` : '';
+      throw new Error(`${submitData.error || 'No se pudo registrar el token.'}${errorId}`);
+    }
+
+    setResult({ txId: submitData.txId, mintAddress: payload.mintAddress });
+    setPendingSubmission(null);
+  };
+
+  const handleRetrySubmission = async () => {
+    if (!pendingSubmission) return;
+    setLoading(true);
+    setError('');
+    try {
+      await submitSignedTransaction(pendingSubmission);
+    } catch (err: any) {
+      setError(err.message || 'No se pudo registrar el token.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleSubmit = async () => {
     if (!publicKey || !signTransaction) {
       setError('Please connect your wallet first');
@@ -102,26 +147,19 @@ export default function TokenForm() {
       // del mint puestas por el backend — no tocar nada más acá.
       const tx = Transaction.from(Buffer.from(createData.transaction, 'base64'));
       const signedTx = await signTransaction(tx);
-
-      const submitRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/submit-transaction`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          signedTransaction: signedTx.serialize().toString('base64'),
-          mintAddress: createData.mintAddress,
-          userWallet: publicKey.toBase58(),
-          name,
-          symbol,
-          description,
-          imageUrl: createData.imageUrl,
-          totalSupply: Number(totalSupply),
-          liquiditySol: Number(liquiditySol),
-        }),
-      });
-      const submitData = await submitRes.json();
-      if (!submitData.success) throw new Error(submitData.error || 'Transaction submission failed');
-
-      setResult({ txId: submitData.txId, mintAddress: createData.mintAddress });
+      const payload: PendingTokenSubmission = {
+        signedTransaction: signedTx.serialize().toString('base64'),
+        mintAddress: createData.mintAddress,
+        userWallet: publicKey.toBase58(),
+        name,
+        symbol,
+        description,
+        imageUrl: createData.imageUrl,
+        totalSupply: Number(totalSupply),
+        liquiditySol: Number(liquiditySol),
+      };
+      setPendingSubmission(payload);
+      await submitSignedTransaction(payload);
     } catch (err: any) {
       setError(err.message || 'An unexpected error occurred');
     } finally {
@@ -343,6 +381,15 @@ export default function TokenForm() {
         {error && (
           <div className="mt-4 bg-red-500/10 border border-red-500/20 text-red-400 text-sm p-3 rounded-lg">
             {error}
+            {pendingSubmission && (
+              <button
+                onClick={handleRetrySubmission}
+                disabled={loading}
+                className="mt-3 block rounded-lg border border-red-400/40 px-3 py-2 disabled:opacity-50"
+              >
+                {loading ? 'Reintentando…' : 'Reintentar registro'}
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -374,7 +421,7 @@ export default function TokenForm() {
         ) : (
           <button
             onClick={handleSubmit}
-            disabled={loading || !feeConfig}
+            disabled={loading || !feeConfig || Boolean(pendingSubmission)}
             className="px-6 py-2.5 rounded-lg font-display text-sm font-medium disabled:opacity-60"
             style={{ background: 'var(--wire-green)', color: '#0a1006' }}
           >

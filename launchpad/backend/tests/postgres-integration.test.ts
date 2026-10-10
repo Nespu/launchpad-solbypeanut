@@ -4,6 +4,7 @@ import { PrismaClient } from '@prisma/client';
 import type { Connection } from '@solana/web3.js';
 import type { Request, Response } from 'express';
 import { createGetMyPoolsHandler, createUpdateWithdrawalResultHandler } from '../src/controllers/tokenControllerHandlers';
+import { cleanMetadataText } from '../src/utils/metadataText';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const integrationTest: typeof test = testDatabaseUrl ? test : test.skip;
@@ -62,6 +63,21 @@ integrationTest('PostgreSQL persists pool filtering and confirmed withdrawal sta
       txHash: 'integration-test',
     })),
   });
+
+  const cleanedToken = await prisma.token.create({
+    data: {
+      mintAddress: `${tokenPrefix}cleaned`,
+      name: cleanMetadataText('To\0ken\0'),
+      symbol: cleanMetadataText('T\0ST\0'),
+      imageUrl: 'https://example.invalid/image.png',
+      totalSupply: 1n,
+      liquiditySol: 1,
+      creatorWallet,
+      txHash: 'integration-clean-metadata',
+    },
+  });
+  assert.equal(cleanedToken.name, 'Token');
+  assert.equal(cleanedToken.symbol, 'TST');
 
   const poolsResponse = responseRecorder();
   await createGetMyPoolsHandler(prisma)(request({ query: { userWallet: creatorWallet } }), poolsResponse.res);

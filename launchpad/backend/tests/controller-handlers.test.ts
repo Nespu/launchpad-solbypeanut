@@ -3,10 +3,13 @@ import test from 'node:test';
 import type { PrismaClient } from '@prisma/client';
 import type { Connection } from '@solana/web3.js';
 import type { Request, Response } from 'express';
+import { Prisma } from '@prisma/client';
 import {
   createGetMyPoolsHandler,
   createUpdateWithdrawalResultHandler,
 } from '../src/controllers/tokenControllerHandlers';
+import { confirmSignedTransaction, createTokenIdempotently } from '../src/services/tokenSubmission';
+import { PublicError } from '../src/utils/publicError';
 
 const wallet = '11111111111111111111111111111111';
 const otherWallet = 'Vote111111111111111111111111111111111111111';
@@ -34,6 +37,62 @@ function request(input: { query?: Record<string, unknown>; body?: Record<string,
 function fakePrisma(overrides: Record<string, unknown>) {
   return overrides as unknown as PrismaClient;
 }
+
+test('confirmed signed transaction retry does not send the transaction again', async () => {
+  let sent = false;
+  const connection = {
+    getSignatureStatuses: async () => ({ value: [{ err: null, confirmationStatus: 'finalized' }] }),
+    sendRawTransaction: async () => { sent = true; return 'signature'; },
+    confirmTransaction: async () => { throw new Error('Already finalized'); },
+  } as unknown as Connection;
+
+  await confirmSignedTransaction(connection, Buffer.from('signed'), 'signature');
+  assert.equal(sent, false);
+});
+
+test('expired signed transaction asks the user to sign again', async () => {
+  const connection = {
+    getSignatureStatuses: async () => ({ value: [null] }),
+    sendRawTransaction: async () => { throw new Error('Blockhash not found'); },
+  } as unknown as Connection;
+
+  await assert.rejects(
+    confirmSignedTransaction(connection, Buffer.from('expired'), 'signature'),
+    (error: unknown) => error instanceof PublicError &&
+      error.status === 400 && error.message === 'La transacción expiró. Vuelve a firmar.',
+  );
+});
+
+test('token registration retry accepts the same mint, signature, and creator', async () => {
+  const record = { mintAddress: 'mint', txHash: 'signature', creatorWallet: wallet };
+  let created = false;
+  const token = {
+    findUnique: async () => record,
+    create: async () => { created = true; return record; },
+  };
+
+  const result = await createTokenIdempotently(token as never, record as never);
+  assert.deepEqual(result, record);
+  assert.equal(created, false);
+});
+
+test('unique-token race only returns success when the competing row matches', async () => {
+  const record = { mintAddress: 'mint', txHash: 'signature', creatorWallet: wallet };
+  let findCount = 0;
+  const token = {
+    findUnique: async () => (++findCount === 1 ? null : record),
+    create: async () => {
+      throw new Prisma.PrismaClientKnownRequestError('Unique constraint failed', {
+        code: 'P2002',
+        clientVersion: 'test',
+      });
+    },
+  };
+
+  const result = await createTokenIdempotently(token as never, record as never);
+  assert.deepEqual(result, record);
+  assert.equal(findCount, 2);
+});
 
 test('getMyPools canonicalizes wallet and asks Prisma to exclude missing and pending pools', async () => {
   let query: unknown;

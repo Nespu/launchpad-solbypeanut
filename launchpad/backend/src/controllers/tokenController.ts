@@ -1,9 +1,12 @@
 import { Request, Response } from 'express';
+import bs58 from 'bs58';
+import { randomUUID } from 'node:crypto';
 import { PublicKey, Transaction, SystemProgram, SystemInstruction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, decodeInitializeMintInstruction, decodeMintToInstruction } from '@solana/spl-token';
 import { Metadata, PROGRAM_ID as METADATA_PROGRAM_ID } from '@metaplex-foundation/mpl-token-metadata';
 import { PrismaClient } from '@prisma/client';
 import { createRaydiumCpmmPool, withdrawLiquidityWithFee } from '../services/raydiumService';
+import { confirmSignedTransaction, createTokenIdempotently } from '../services/tokenSubmission';
 import { buildMintInstructions } from '../services/mintService';
 import {
   buildRevokeMintInstruction,
@@ -14,6 +17,8 @@ import { uploadImageToIpfs, uploadMetadataToIpfs } from '../services/ipfsService
 import { logger } from '../utils/logger';
 import { connection, getServerKeypair, platformFeeWallet } from '../utils/solana';
 import { config } from '../utils/config';
+import { cleanMetadataText } from '../utils/metadataText';
+import { PublicError } from '../utils/publicError';
 import { createGetMyPoolsHandler, createUpdateWithdrawalResultHandler } from './tokenControllerHandlers';
 
 const prisma = new PrismaClient();
@@ -185,58 +190,63 @@ export const submitTransaction = async (req: Request, res: Response): Promise<Re
       return res.status(400).json({ success: false, error: 'Signed transaction does not create and mint the supplied token' });
     }
 
+    const signature = bs58.encode(creatorSignature);
+    const successPayload = {
+      success: true,
+      txId: signature,
+      mintAddress: mintPublicKey.toBase58(),
+      solanaUrl: `https://solscan.io/tx/${signature}`,
+    };
     const existingToken = await prisma.token.findUnique({ where: { mintAddress: mintPublicKey.toBase58() } });
-    if (existingToken) return res.status(409).json({ success: false, error: 'Token is already registered' });
-
-    const signature = await connection.sendRawTransaction(tx.serialize(), {
-      skipPreflight: false,
-      maxRetries: 3,
-    });
-
-    const confirmation = await connection.confirmTransaction(signature, 'confirmed');
-
-    if (confirmation.value.err) {
-      throw new Error(`Transaction failed: ${confirmation.value.err}`);
+    if (existingToken) {
+      if (existingToken.txHash === signature && existingToken.creatorWallet === creatorPublicKey.toBase58()) {
+        return res.status(200).json(successPayload);
+      }
+      return res.status(409).json({ success: false, error: 'Token is already registered' });
     }
+
+    await confirmSignedTransaction(connection, tx.serialize(), signature);
 
     const [metadataAddress] = PublicKey.findProgramAddressSync(
       [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mintPublicKey.toBuffer()],
       METADATA_PROGRAM_ID,
     );
-    const onChainMetadata = await Metadata.fromAccountAddress(connection, metadataAddress);
+    const onChainMetadata = await Metadata.fromAccountAddress(connection, metadataAddress, 'confirmed');
     if (!onChainMetadata.mint.equals(mintPublicKey) || !onChainMetadata.updateAuthority.equals(creatorPublicKey)) {
-      throw new Error('On-chain metadata does not match the submitted mint and creator');
+      throw new PublicError('On-chain metadata does not match the submitted mint and creator', 400);
     }
 
-    await prisma.token.create({
-      data: {
-        mintAddress: mintPublicKey.toBase58(),
-        name: onChainMetadata.data.name.trim(),
-        symbol: onChainMetadata.data.symbol.trim(),
-        description: description || null,
-        imageUrl,
-        totalSupply: BigInt(totalSupply),
-        liquiditySol,
-        creatorWallet: creatorPublicKey.toBase58(),
-        copiedFrom: copyFrom || null,
-        txHash: signature,
-        status: 'completed',
-        poolAddress: null,
-      },
+    await createTokenIdempotently(prisma.token, {
+      mintAddress: mintPublicKey.toBase58(),
+      name: cleanMetadataText(onChainMetadata.data.name),
+      symbol: cleanMetadataText(onChainMetadata.data.symbol),
+      description: description || null,
+      imageUrl,
+      totalSupply: BigInt(totalSupply),
+      liquiditySol,
+      creatorWallet: creatorPublicKey.toBase58(),
+      copiedFrom: copyFrom || null,
+      txHash: signature,
+      status: 'completed',
+      poolAddress: null,
     });
 
-    return res.status(200).json({
-      success: true,
-      txId: signature,
-      mintAddress: mintPublicKey.toBase58(),
-      solanaUrl: `https://solscan.io/tx/${signature}`,
-    });
+    return res.status(200).json(successPayload);
 
   } catch (error: any) {
-    logger.error({ error: error.message }, 'Error submitting transaction');
+    if (error instanceof PublicError) {
+      return res.status(error.status).json({ success: false, error: error.message });
+    }
+    const errorId = randomUUID();
+    logger.error({
+      errorId,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      message: error instanceof Error ? error.message : String(error),
+    }, 'Error submitting transaction');
     return res.status(500).json({
       success: false,
-      error: error.message || 'Internal server error',
+      error: 'No se pudo registrar el token. Conserva este código para soporte.',
+      errorId,
     });
   }
 };
