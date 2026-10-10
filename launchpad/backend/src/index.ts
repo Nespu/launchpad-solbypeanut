@@ -1,15 +1,29 @@
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import { tokenRouter } from './routes/tokenRoutes';
+import { apiRateLimit } from './middleware/rateLimit';
+import { config } from './utils/config';
 import { logger } from './utils/logger';
 
-dotenv.config();
-
 const app = express();
-const PORT = process.env.PORT || 3001;
+const allowedOrigins = new Set(config.corsOrigins);
 
-app.use(cors());
+app.disable('x-powered-by');
+app.set('trust proxy', config.trustProxyHops);
+app.use((req, res, next) => {
+  const origin = req.get('origin');
+  if (origin && !allowedOrigins.has(origin)) {
+    return res.status(403).json({ success: false, error: 'Origin not allowed' });
+  }
+  return next();
+});
+app.use(cors({
+  origin: (origin, callback) => callback(null, !origin || allowedOrigins.has(origin)),
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type'],
+  maxAge: 600,
+}));
+app.use('/api', apiRateLimit);
 // Límite subido de los 100kb por defecto de Express: las imágenes de los
 // tokens viajan como Base64 en el body JSON, y eso pesa bastante más que
 // el archivo original (~33% más grande al codificarse en Base64).
@@ -24,6 +38,6 @@ app.get('/health', (req, res) => {
 // Rutas
 app.use('/api', tokenRouter);
 
-app.listen(PORT, () => {
-  logger.info(`Server running on port ${PORT}`);
+app.listen(config.port, () => {
+  logger.info(`Server running on port ${config.port}`);
 });

@@ -2,12 +2,19 @@
 
 import Image from 'next/image';
 import Link from 'next/link';
+import { useEffect, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import WalletConnector from '../components/WalletConnector';
 import TokenForm from '../components/TokenForm';
 
 export default function Home() {
-  const { connected } = useWallet();
+  const { connected, connecting } = useWallet();
+  const [walletCheckComplete, setWalletCheckComplete] = useState(false);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setWalletCheckComplete(true), 800);
+    return () => window.clearTimeout(timeout);
+  }, []);
 
   return (
     <main className="min-h-screen p-4 md:p-8">
@@ -39,14 +46,16 @@ export default function Home() {
 
         {connected ? (
           <TokenForm />
-        ) : (
+        ) : walletCheckComplete && !connecting ? (
           <div className="glass-card p-12 text-center rounded-2xl max-w-xl mx-auto">
             <h3 className="text-xl font-display font-semibold mb-3">Conectá tu wallet para empezar</h3>
             <p className="text-[var(--muted)] text-sm mb-6">
-              Necesitás una wallet de Solana como Phantom o Solflare para crear tu token.
+              Podés usar Phantom, Solflare, Backpack u otra wallet de Solana compatible para crear tu token.
             </p>
             <WalletConnector />
           </div>
+        ) : (
+          <div className="min-h-[162px] max-w-xl mx-auto" aria-hidden="true" />
         )}
 
         <section className="grid md:grid-cols-3 gap-6 mt-16">

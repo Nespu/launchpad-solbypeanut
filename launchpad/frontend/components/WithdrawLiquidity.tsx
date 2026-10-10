@@ -72,6 +72,8 @@ export default function WithdrawLiquidity({ poolAddress, onBack }: WithdrawLiqui
     }
     setLoading(true);
     setError('');
+    let withdrawalId: string | undefined;
+    let txId: string | undefined;
 
     try {
       const createRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/withdraw-liquidity`, {
@@ -85,6 +87,7 @@ export default function WithdrawLiquidity({ poolAddress, onBack }: WithdrawLiqui
       });
       const createData = await createRes.json();
       if (!createData.success) throw new Error(createData.error || 'Failed to prepare withdrawal');
+      withdrawalId = createData.withdrawalId;
 
       const rpcConn = new Connection(
         process.env.NEXT_PUBLIC_RPC_ENDPOINT || 'https://api.devnet.solana.com'
@@ -97,11 +100,19 @@ export default function WithdrawLiquidity({ poolAddress, onBack }: WithdrawLiqui
 
       const signedTx = await signTransaction(tx);
 
-      const sig = await rpcConn.sendRawTransaction(signedTx.serialize());
-      await rpcConn.confirmTransaction(sig, 'confirmed');
+      txId = await rpcConn.sendRawTransaction(signedTx.serialize());
+      await rpcConn.confirmTransaction(txId, 'confirmed');
+
+      const resultRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/withdrawal-result`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ withdrawalId, userWallet: publicKey.toBase58(), txHash: txId }),
+      });
+      const resultData = await resultRes.json();
+      if (!resultData.success) throw new Error(resultData.error || 'Withdrawal confirmed, but its history could not be updated');
 
       setResult({
-        txId: sig,
+        txId,
         userAmountSol: createData.userAmountSol,
         platformFeeSol: createData.platformFeeSol,
       });
@@ -111,6 +122,20 @@ export default function WithdrawLiquidity({ poolAddress, onBack }: WithdrawLiqui
       setPercent(0);
       await fetchBalance();
     } catch (err: any) {
+      if (withdrawalId && publicKey) {
+        try {
+          await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/withdrawal-result`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              withdrawalId,
+              userWallet: publicKey.toBase58(),
+              ...(txId ? { txHash: txId } : { error: err.message || 'Withdrawal cancelled or failed' }),
+            }),
+          });
+        } catch {
+        }
+      }
       setError(err.message || 'An unexpected error occurred');
     } finally {
       setLoading(false);

@@ -6,6 +6,9 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p .",
+    "test": "tsx --test tests/api-validation.test.ts tests/token-routes.test.ts tests/controller-handlers.test.ts",
+    "test:integration": "tsx --test tests/postgres-integration.test.ts",
+    "test:redis-integration": "tsx --test tests/redis-integration.test.ts",
     "start": "node dist/index.js",
     "worker": "tsx watch src/queues/worker.ts",
     "prisma:generate": "prisma generate",

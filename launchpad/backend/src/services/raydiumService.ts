@@ -182,7 +182,7 @@ export async function withdrawLiquidityWithFee(
   platformFeeSol: number;
 }> {
   try {
-    const { Raydium, TxVersion } = await import("@raydium-io/raydium-sdk-v2");
+    const { Raydium, Percent, TxVersion } = await import("@raydium-io/raydium-sdk-v2");
     const isDevnet = connection.rpcEndpoint.includes("devnet");
 
     const raydium = await Raydium.load({
@@ -216,6 +216,9 @@ export async function withdrawLiquidityWithFee(
     // --- Cálculo con BigInt nativo ---
     const lpAmountBig = BigInt(lpTokenAmount);
     const lpSupplyBig = BigInt(rpcData.lpAmount.toString());
+    if (lpAmountBig <= BigInt(0) || lpSupplyBig <= BigInt(0)) {
+      throw new Error("LP amount and pool supply must be greater than zero");
+    }
 
     // Si mintA es SOL, la reserva de SOL está en "baseReserve".
     // Si no, mintB es SOL y la reserva está en "quoteReserve".
@@ -242,10 +245,9 @@ export async function withdrawLiquidityWithFee(
     const { transaction } = await raydium.cpmm.withdrawLiquidity({
       poolInfo,
       poolKeys,
+      payer: userWallet,
       lpAmount,
-      baseMinAmount: new BN(0),
-      quoteMinAmount: new BN(0),
-      ownerInfo: { useSOLBalance: true },
+      slippage: new Percent(1, 100),
       txVersion: TxVersion.LEGACY,
     });
 

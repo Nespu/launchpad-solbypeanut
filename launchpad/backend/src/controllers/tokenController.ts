@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
-import { PublicKey, Transaction, SystemProgram, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { PublicKey, Transaction, SystemProgram, SystemInstruction, LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { TOKEN_PROGRAM_ID, decodeInitializeMintInstruction, decodeMintToInstruction } from '@solana/spl-token';
 import { PrismaClient } from '@prisma/client';
 import { createRaydiumCpmmPool, withdrawLiquidityWithFee } from '../services/raydiumService';
 import { buildMintInstructions } from '../services/mintService';
@@ -8,9 +9,11 @@ import {
   buildRevokeFreezeInstruction,
   buildRevokeUpdateInstruction,
 } from '../services/authorityService';
-import { uploadImageToIpfs } from '../services/ipfsService';
+import { uploadImageToIpfs, uploadMetadataToIpfs } from '../services/ipfsService';
 import { logger } from '../utils/logger';
-import { connection, getServerKeypair } from '../utils/solana';
+import { connection, getServerKeypair, platformFeeWallet } from '../utils/solana';
+import { config } from '../utils/config';
+import { createGetMyPoolsHandler, createUpdateWithdrawalResultHandler } from './tokenControllerHandlers';
 
 const prisma = new PrismaClient();
 
@@ -35,9 +38,7 @@ export const createToken = async (req: Request, res: Response): Promise<Response
       });
     }
 
-    const BASE_FEE = 0.5;
-    const ASSET_FEE = 0.1;
-    const totalFee = BASE_FEE + (securityAssets.length * ASSET_FEE);
+    const totalFee = config.baseFeeSol + securityAssets.length * config.assetFeeSol;
 
     const serverWallet = getServerKeypair();
     const userPublicKey = new PublicKey(userWallet);
@@ -49,11 +50,13 @@ export const createToken = async (req: Request, res: Response): Promise<Response
       imageUrl = 'https://via.placeholder.com/200x200?text=Memecoin';
     }
 
+    const metadataUri = await uploadMetadataToIpfs({ name, symbol, description: description || '', image: imageUrl });
+
     const { mintKeypair, instructions: mintInstructions } = await buildMintInstructions({
       userWallet: userPublicKey,
       name,
       symbol,
-      metadataUri: imageUrl,
+      metadataUri,
       totalSupply: BigInt(totalSupply) * BigInt(1e9),
       decimals: 9,
     });
@@ -73,7 +76,7 @@ export const createToken = async (req: Request, res: Response): Promise<Response
 
     const feeInstruction = SystemProgram.transfer({
       fromPubkey: userPublicKey,
-      toPubkey: new PublicKey(process.env.PLATFORM_FEE_WALLET!),
+      toPubkey: platformFeeWallet,
       lamports: Math.floor(totalFee * LAMPORTS_PER_SOL),
     });
     transaction.add(feeInstruction);
@@ -88,28 +91,12 @@ export const createToken = async (req: Request, res: Response): Promise<Response
       verifySignatures: false,
     });
 
-    await prisma.token.create({
-      data: {
-        mintAddress: mintKeypair.publicKey.toBase58(),
-        name,
-        symbol,
-        description,
-        imageUrl,
-        totalSupply: BigInt(totalSupply),
-        liquiditySol,
-        creatorWallet: userWallet,
-        copiedFrom: copyFrom || null,
-        txHash: 'pending',
-        poolAddress: 'pending',
-        status: 'processing',
-      },
-    });
-
     return res.status(200).json({
       success: true,
       transaction: serializedTx.toString('base64'),
       fee: totalFee,
       mintAddress: mintKeypair.publicKey.toBase58(),
+      imageUrl,
       message: 'Token creation prepared',
     });
 
@@ -124,16 +111,61 @@ export const createToken = async (req: Request, res: Response): Promise<Response
 
 export const submitTransaction = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const { signedTransaction, mintAddress } = req.body;
+    const { signedTransaction, mintAddress, userWallet, name, symbol, description, imageUrl, totalSupply, liquiditySol, copyFrom } = req.body;
+    if (!signedTransaction || !mintAddress || !userWallet || !name || !symbol || !imageUrl || !totalSupply || !liquiditySol) {
+      return res.status(400).json({ success: false, error: 'Missing required fields for transaction confirmation' });
+    }
 
-    if (!signedTransaction || !mintAddress) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: signedTransaction, mintAddress',
-      });
+    let creatorPublicKey: PublicKey;
+    let mintPublicKey: PublicKey;
+    try {
+      creatorPublicKey = new PublicKey(userWallet);
+      mintPublicKey = new PublicKey(mintAddress);
+    } catch {
+      return res.status(400).json({ success: false, error: 'Invalid creator wallet or mint address' });
     }
 
     const tx = Transaction.from(Buffer.from(signedTransaction, 'base64'));
+    const creatorSignature = tx.signatures.find((item) => item.publicKey.equals(creatorPublicKey))?.signature;
+    if (!tx.feePayer?.equals(creatorPublicKey) || !creatorSignature || !tx.verifySignatures(false)) {
+      return res.status(400).json({ success: false, error: 'Transaction must be valid and signed by the token creator' });
+    }
+
+    const expectedSupply = BigInt(totalSupply) * BigInt(1_000_000_000);
+    const createsMint = tx.instructions.some((instruction) => {
+      if (!instruction.programId.equals(SystemProgram.programId)) return false;
+      try {
+        return SystemInstruction.decodeCreateAccount(instruction).newAccountPubkey.equals(mintPublicKey);
+      } catch {
+        return false;
+      }
+    });
+    const initializesMint = tx.instructions.some((instruction) => {
+      if (!instruction.programId.equals(TOKEN_PROGRAM_ID)) return false;
+      try {
+        const decoded = decodeInitializeMintInstruction(instruction);
+        return decoded.keys.mint.pubkey.equals(mintPublicKey) && decoded.data.mintAuthority.equals(creatorPublicKey);
+      } catch {
+        return false;
+      }
+    });
+    const mintsExpectedSupply = tx.instructions.some((instruction) => {
+      if (!instruction.programId.equals(TOKEN_PROGRAM_ID)) return false;
+      try {
+        const decoded = decodeMintToInstruction(instruction);
+        return decoded.keys.mint.pubkey.equals(mintPublicKey) &&
+          decoded.keys.authority.pubkey.equals(creatorPublicKey) &&
+          decoded.data.amount === expectedSupply;
+      } catch {
+        return false;
+      }
+    });
+    if (!createsMint || !initializesMint || !mintsExpectedSupply) {
+      return res.status(400).json({ success: false, error: 'Signed transaction does not create and mint the supplied token' });
+    }
+
+    const existingToken = await prisma.token.findUnique({ where: { mintAddress: mintPublicKey.toBase58() } });
+    if (existingToken) return res.status(409).json({ success: false, error: 'Token is already registered' });
 
     const signature = await connection.sendRawTransaction(tx.serialize(), {
       skipPreflight: false,
@@ -146,18 +178,27 @@ export const submitTransaction = async (req: Request, res: Response): Promise<Re
       throw new Error(`Transaction failed: ${confirmation.value.err}`);
     }
 
-    await prisma.token.update({
-      where: { mintAddress },
+    await prisma.token.create({
       data: {
+        mintAddress: mintPublicKey.toBase58(),
+        name,
+        symbol,
+        description: description || null,
+        imageUrl,
+        totalSupply: BigInt(totalSupply),
+        liquiditySol,
+        creatorWallet: creatorPublicKey.toBase58(),
+        copiedFrom: copyFrom || null,
         txHash: signature,
         status: 'completed',
+        poolAddress: null,
       },
     });
 
     return res.status(200).json({
       success: true,
       txId: signature,
-      mintAddress,
+      mintAddress: mintPublicKey.toBase58(),
       solanaUrl: `https://solscan.io/tx/${signature}`,
     });
 
@@ -356,49 +397,7 @@ export const submitPoolTransaction = async (req: Request, res: Response): Promis
     });
   }
 };
-export const getMyPools = async (req: Request, res: Response): Promise<Response> => {
-  try {
-    const { userWallet } = req.query;
-
-    if (typeof userWallet !== 'string' || !userWallet) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required query param: userWallet',
-      });
-    }
-
-    let creatorWallet: string;
-    try {
-      creatorWallet = new PublicKey(userWallet).toBase58();
-    } catch {
-      return res.status(400).json({ success: false, error: 'Invalid userWallet' });
-    }
-
-    const pools = await prisma.token.findMany({
-      where: {
-        creatorWallet,
-        poolAddress: { not: null, notIn: ['pending', ''] },
-      },
-      select: {
-        mintAddress: true,
-        name: true,
-        symbol: true,
-        imageUrl: true,
-        poolAddress: true,
-        createdAt: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
-
-    return res.status(200).json({ success: true, pools });
-  } catch (error: any) {
-    logger.error({ error: error.message }, 'Error fetching user pools');
-    return res.status(500).json({
-      success: false,
-      error: error.message || 'Internal server error',
-    });
-  }
-};
+export const getMyPools = createGetMyPoolsHandler(prisma);
 export const withdrawLiquidity = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { userWallet, poolAddress, lpTokenAmount } = req.body;
@@ -412,7 +411,7 @@ export const withdrawLiquidity = async (req: Request, res: Response): Promise<Re
 
     const userPublicKey = new PublicKey(userWallet);
     const poolPublicKey = new PublicKey(poolAddress);
-    const feeWallet = new PublicKey(process.env.PLATFORM_FEE_WALLET!);
+    const feeWallet = platformFeeWallet;
 
     const { transaction, userAmountSol, platformFeeSol } = await withdrawLiquidityWithFee(
       connection,
@@ -457,6 +456,12 @@ export const withdrawLiquidity = async (req: Request, res: Response): Promise<Re
       error: error.message || 'Internal server error',
     });
   }
+};
+
+export const updateWithdrawalResult = createUpdateWithdrawalResultHandler(prisma, connection);
+
+export const getFeeConfig = (_req: Request, res: Response): Response => {
+  return res.status(200).json({ success: true, baseFeeSol: config.baseFeeSol, assetFeeSol: config.assetFeeSol });
 };
 
 export const getLpBalance = async (req: Request, res: Response): Promise<Response> => {

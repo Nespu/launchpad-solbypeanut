@@ -1,15 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Transaction } from '@solana/web3.js';
 import TrustRing from './TrustRing';
 import PoolCreate from './PoolCreate';
 
 const STEPS = ['Token', 'Supply', 'Seguridad'];
-const BASE_FEE = 0.5;
-const ASSET_FEE = 0.1;
-
 const AUTHORITIES = [
   { key: 'mint', icon: '🔒', name: 'Revoke Mint', desc: 'Nadie podrá acuñar más supply del que existe hoy.' },
   { key: 'freeze', icon: '❄️', name: 'Revoke Freeze', desc: 'Ninguna wallet podrá ser congelada.' },
@@ -34,10 +31,27 @@ export default function TokenForm() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [feeConfig, setFeeConfig] = useState<{ baseFeeSol: number; assetFeeSol: number } | null>(null);
   const [result, setResult] = useState<{ txId: string; mintAddress: string } | null>(null);
   const [goToPool, setGoToPool] = useState(false);
 
-  const totalFee = BASE_FEE + securityAssets.length * ASSET_FEE;
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/fee-config`)
+      .then((response) => response.json())
+      .then((data) => {
+        if (!data.success || cancelled) return;
+        setFeeConfig({ baseFeeSol: data.baseFeeSol, assetFeeSol: data.assetFeeSol });
+      })
+      .catch(() => {
+        if (!cancelled) setError('No se pudo cargar el costo de creación. Recarga la página e intenta de nuevo.');
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  const totalFee = feeConfig ? feeConfig.baseFeeSol + securityAssets.length * feeConfig.assetFeeSol : null;
+  const securityFee = feeConfig ? securityAssets.length * feeConfig.assetFeeSol : null;
+  const formatSol = (amount: number) => `${amount.toFixed(6).replace(/\.?0+$/, '')} SOL`;
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -95,6 +109,13 @@ export default function TokenForm() {
         body: JSON.stringify({
           signedTransaction: signedTx.serialize().toString('base64'),
           mintAddress: createData.mintAddress,
+          userWallet: publicKey.toBase58(),
+          name,
+          symbol,
+          description,
+          imageUrl: createData.imageUrl,
+          totalSupply: Number(totalSupply),
+          liquiditySol: Number(liquiditySol),
         }),
       });
       const submitData = await submitRes.json();
@@ -240,7 +261,9 @@ export default function TokenForm() {
                   >
                     <div className="flex justify-between items-start mb-2">
                       <span>{a.icon}</span>
-                      <span className="text-[10px] font-mono" style={{ color: 'var(--wire-green)' }}>+0.1 SOL</span>
+                      <span className="text-[10px] font-mono" style={{ color: 'var(--wire-green)' }}>
+                        {feeConfig ? (feeConfig.assetFeeSol > 0 ? `+${formatSol(feeConfig.assetFeeSol)}` : 'Sin cargo extra') : 'Cargando…'}
+                      </span>
                     </div>
                     <div className="text-xs font-semibold mb-1">{a.name}</div>
                     <div className="text-[10px] text-[var(--muted)] leading-tight mb-2">{a.desc}</div>
@@ -289,6 +312,31 @@ export default function TokenForm() {
                 </div>
               )}
             </div>
+
+            <section className="rounded-xl p-4 wire-input space-y-3" aria-label="Resumen de costos antes de firmar">
+              <h3 className="text-sm font-semibold">Resumen antes de firmar</h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between gap-4 text-[var(--muted)]">
+                  <span>Fee base de plataforma</span>
+                  <span className="font-mono text-[var(--text)]">{feeConfig ? formatSol(feeConfig.baseFeeSol) : 'Cargando…'}</span>
+                </div>
+                <div className="flex justify-between gap-4 text-[var(--muted)]">
+                  <span>Adicional por seguridad ({securityAssets.length} × {feeConfig ? formatSol(feeConfig.assetFeeSol) : '…'})</span>
+                  <span className="font-mono text-[var(--text)]">{securityFee === null ? 'Cargando…' : formatSol(securityFee)}</span>
+                </div>
+                <div className="flex justify-between gap-4 border-t pt-2 font-semibold" style={{ borderColor: 'var(--line)' }}>
+                  <span>Fee total de plataforma</span>
+                  <span className="font-mono">{totalFee === null ? 'Cargando…' : formatSol(totalFee)}</span>
+                </div>
+                <div className="flex justify-between gap-4 text-[var(--muted)]">
+                  <span>Liquidez inicial (al crear la pool después)</span>
+                  <span className="font-mono">{liquiditySol || '0'} SOL</span>
+                </div>
+              </div>
+              <p className="text-[11px] leading-relaxed text-[var(--muted)]">
+                El fee de plataforma se incluye en la transacción de creación del token. La liquidez se aporta después, al crear la pool. La wallet mostrará aparte la comisión de red antes de firmar.
+              </p>
+            </section>
           </div>
         )}
 
@@ -310,8 +358,8 @@ export default function TokenForm() {
         </button>
 
         <div className="text-right">
-          <div className="text-[11px] text-[var(--muted)]">Costo total</div>
-          <div className="font-mono text-lg">{totalFee.toFixed(1)} <span className="text-xs text-[var(--muted)]">SOL</span></div>
+          <div className="text-[11px] text-[var(--muted)]">Fee plataforma</div>
+          <div className="font-mono text-lg">{totalFee === null ? '—' : `${totalFee.toFixed(6).replace(/\.?0+$/, '')} `}<span className="text-xs text-[var(--muted)]">SOL</span></div>
         </div>
 
         {step < 2 ? (
@@ -326,11 +374,11 @@ export default function TokenForm() {
         ) : (
           <button
             onClick={handleSubmit}
-            disabled={loading}
+            disabled={loading || !feeConfig}
             className="px-6 py-2.5 rounded-lg font-display text-sm font-medium disabled:opacity-60"
             style={{ background: 'var(--wire-green)', color: '#0a1006' }}
           >
-            {loading ? 'Creando...' : 'Create Token'}
+            {loading ? 'Creando...' : !feeConfig ? 'Cargando costo...' : 'Create Token'}
           </button>
         )}
       </div>
