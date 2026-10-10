@@ -134,3 +134,15 @@ Las pruebas de integración de base de datos y Redis se ejecutaron en aislamient
 - `backend/src/utils/config.ts` exige orígenes HTTPS, RPC HTTPS y Redis TLS en `NODE_ENV=production`. No valida `RPC_WEBSOCKET` como WSS cuando se configura; conviene añadir esa validación antes de Mainnet.
 - `TRUST_PROXY_HOPS` debe coincidir con los proxies reales para que los límites por IP sean confiables. CORS restringe navegadores, pero no autentica clientes; los límites actuales son por IP. No exponer públicamente sin una estrategia de abuso/autenticación y observabilidad.
 - No se leyeron secretos ni se ejecutaron transacciones. No se reiniciaron los contenedores para evitar interrumpir la sesión; la nueva vinculación localhost se aplica cuando Compose recree los servicios.
+
+## Revisión de fees, firmas y slippage
+
+- Respaldo local creado en el commit `27031f1` (`Fixes de Codex: bugs 1-7, wallets, seguridad, tests`). `backend/.env` no está versionado y está excluido por `backend/.gitignore`.
+- El push a `origin/codex-fixes` no se completó: GitHub rechazó las credenciales HTTPS configuradas (`Invalid username or token`). El commit local está intacto; hace falta autenticación GitHub para subirlo.
+- `createToken` firma parcialmente la transacción con la keypair del mint y la wallet del servidor; esta última paga la creación del mint y la cuenta ATA. El usuario firma como fee payer y autoridad del token.
+- `submitTransaction` ahora requiere y verifica tanto la firma del creador como la del servidor, además de exigir la transferencia de fee desde el creador a la wallet de plataforma por uno de los montos permitidos según la configuración (fee base más 0–3 adicionales).
+- El schema Prisma define `Token.mintAddress` como `@unique`; el endpoint también rechaza un mint ya registrado. Dos solicitudes concurrentes no pueden persistir dos registros para el mismo mint, aunque una puede recibir error de unicidad en la carrera.
+- El registro de token ahora toma nombre y símbolo de la cuenta Metadata on-chain y comprueba que corresponda al mint y al creador; ya no confía en esos dos campos del segundo request del frontend.
+- Los tipos instalados de `@raydium-io/raydium-sdk-v2` definen `WithdrawCpmmLiquidityParams.slippage` como `Percent`; `new Percent(1, 100)` representa 1%. El SDK calcula los mínimos como la salida proporcional multiplicada por `1 - slippage`.
+- `raydiumService.ts` ahora registra los mínimos base/quote calculados en unidades raw en cada preparación de retiro. La UI advierte que los activos pueden quedar hasta 1% por debajo de la estimación y que el fee de plataforma se calcula sobre esa estimación.
+- Verificación ejecutada: `backend`: `npx tsc --noEmit` pasó después de estos cambios. No se enviaron transacciones nuevas; la repetición de la prueba de navegador queda pendiente del usuario.

@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PublicKey, Transaction, SystemProgram, SystemInstruction, LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { TOKEN_PROGRAM_ID, decodeInitializeMintInstruction, decodeMintToInstruction } from '@solana/spl-token';
+import { Metadata, PROGRAM_ID as METADATA_PROGRAM_ID } from '@metaplex-foundation/mpl-token-metadata';
 import { PrismaClient } from '@prisma/client';
 import { createRaydiumCpmmPool, withdrawLiquidityWithFee } from '../services/raydiumService';
 import { buildMintInstructions } from '../services/mintService';
@@ -127,8 +128,28 @@ export const submitTransaction = async (req: Request, res: Response): Promise<Re
 
     const tx = Transaction.from(Buffer.from(signedTransaction, 'base64'));
     const creatorSignature = tx.signatures.find((item) => item.publicKey.equals(creatorPublicKey))?.signature;
-    if (!tx.feePayer?.equals(creatorPublicKey) || !creatorSignature || !tx.verifySignatures(false)) {
-      return res.status(400).json({ success: false, error: 'Transaction must be valid and signed by the token creator' });
+    const serverPublicKey = getServerKeypair().publicKey;
+    const serverSignature = tx.signatures.find((item) => item.publicKey.equals(serverPublicKey))?.signature;
+    if (!tx.feePayer?.equals(creatorPublicKey) || !creatorSignature || !serverSignature || !tx.verifySignatures(true)) {
+      return res.status(400).json({ success: false, error: 'Transaction must include valid creator and server signatures' });
+    }
+
+    const feeTransfers = tx.instructions.flatMap((instruction) => {
+      if (!instruction.programId.equals(SystemProgram.programId)) return [];
+      try {
+        const transfer = SystemInstruction.decodeTransfer(instruction);
+        return transfer.fromPubkey.equals(creatorPublicKey) && transfer.toPubkey.equals(platformFeeWallet)
+          ? [transfer.lamports]
+          : [];
+      } catch {
+        return [];
+      }
+    });
+    const allowedFeeLamports = [0, 1, 2, 3].map((assetCount) =>
+      BigInt(Math.floor((config.baseFeeSol + assetCount * config.assetFeeSol) * LAMPORTS_PER_SOL)),
+    );
+    if (feeTransfers.length !== 1 || !allowedFeeLamports.includes(feeTransfers[0])) {
+      return res.status(400).json({ success: false, error: 'Transaction does not include the configured platform fee' });
     }
 
     const expectedSupply = BigInt(totalSupply) * BigInt(1_000_000_000);
@@ -178,11 +199,20 @@ export const submitTransaction = async (req: Request, res: Response): Promise<Re
       throw new Error(`Transaction failed: ${confirmation.value.err}`);
     }
 
+    const [metadataAddress] = PublicKey.findProgramAddressSync(
+      [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mintPublicKey.toBuffer()],
+      METADATA_PROGRAM_ID,
+    );
+    const onChainMetadata = await Metadata.fromAccountAddress(connection, metadataAddress);
+    if (!onChainMetadata.mint.equals(mintPublicKey) || !onChainMetadata.updateAuthority.equals(creatorPublicKey)) {
+      throw new Error('On-chain metadata does not match the submitted mint and creator');
+    }
+
     await prisma.token.create({
       data: {
         mintAddress: mintPublicKey.toBase58(),
-        name,
-        symbol,
+        name: onChainMetadata.data.name.trim(),
+        symbol: onChainMetadata.data.symbol.trim(),
         description: description || null,
         imageUrl,
         totalSupply: BigInt(totalSupply),

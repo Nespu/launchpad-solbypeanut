@@ -156,7 +156,7 @@ export default function WithdrawLiquidity({ poolAddress, onBack }: WithdrawLiqui
       <div className="text-xs font-mono mb-1" style={{ color: 'var(--wire-green)' }}>STAGE 4 - RETIRO</div>
       <h2 className="font-display text-2xl mb-2">Retira liquidez</h2>
       <p className="text-sm text-[var(--muted)] mb-6">
-        90% vuelve a tu wallet, 10% queda como fee de la plataforma. Se calcula sobre el valor real del pool.
+        90% vuelve a tu wallet, 10% queda como fee de la plataforma. Se calcula sobre la estimación actual del pool. La tolerancia de slippage del 1% permite que los activos recibidos queden hasta 1% por debajo de esa estimación.
       </p>
 
       <div className="glass-card rounded-2xl p-6 space-y-5">

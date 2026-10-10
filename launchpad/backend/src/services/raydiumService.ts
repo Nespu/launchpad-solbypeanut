@@ -230,13 +230,18 @@ export async function withdrawLiquidityWithFee(
     const proportionalLamportsBig =
       lpSupplyBig === BigInt(0) ? BigInt(0) : (solVaultBig * lpAmountBig) / lpSupplyBig;
 
+    const baseReserveBig = BigInt((rpcData as any).baseReserve.toString());
+    const quoteReserveBig = BigInt((rpcData as any).quoteReserve.toString());
+    const baseMinAmountRaw = ((lpAmountBig * baseReserveBig) / lpSupplyBig * BigInt(99)) / BigInt(100);
+    const quoteMinAmountRaw = ((lpAmountBig * quoteReserveBig) / lpSupplyBig * BigInt(99)) / BigInt(100);
+
     const totalSolOut = Number(proportionalLamportsBig) / LAMPORTS_PER_SOL;
     const platformFeeSol = totalSolOut * 0.10;
     const userAmountSol = totalSolOut * 0.90;
     // --- fin cálculo BigInt ---
 
     logger.info(
-      { poolId, lpTokenAmount, totalSolOut, userAmountSol, platformFeeSol },
+      { poolId, lpTokenAmount, totalSolOut, userAmountSol, platformFeeSol, slippagePercent: 1, baseMinAmountRaw: baseMinAmountRaw.toString(), quoteMinAmountRaw: quoteMinAmountRaw.toString() },
       "Preparing REAL withdrawal with 10% fee"
     );
 
