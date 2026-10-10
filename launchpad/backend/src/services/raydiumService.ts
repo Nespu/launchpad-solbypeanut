@@ -6,27 +6,109 @@ import {
   SystemProgram,
   LAMPORTS_PER_SOL
 } from "@solana/web3.js";
+import BN from "bn.js";
 import { logger } from "../utils/logger";
 
 // ============================================================
-// 1. CONFIGURACIÓN DE RAYDIUM (SDK v2)
+// 0. CREACIÓN REAL DE POOL CPMM (Stage 2, SDK real de Raydium)
+// ============================================================
+export interface CreateCpmmPoolParams {
+  userWallet: PublicKey;
+  mintAddress: PublicKey;
+  mintDecimals: number;
+  tokenAmount: string;
+  solAmount: number;
+}
+
+export interface CreateCpmmPoolResult {
+  transaction: Transaction;
+  poolId: string;
+}
+
+export async function createRaydiumCpmmPool(
+  connection: Connection,
+  params: CreateCpmmPoolParams
+): Promise<CreateCpmmPoolResult> {
+  const {
+    Raydium,
+    DEVNET_PROGRAM_ID,
+    CREATE_CPMM_POOL_PROGRAM,
+    CREATE_CPMM_POOL_FEE_ACC,
+    getCpmmPdaAmmConfigId,
+    TxVersion,
+  } = await import("@raydium-io/raydium-sdk-v2");
+
+  const isDevnet = connection.rpcEndpoint.includes("devnet");
+
+  const raydium = await Raydium.load({
+    connection,
+    owner: params.userWallet,
+    cluster: isDevnet ? "devnet" : "mainnet",
+    disableLoadToken: true,
+  });
+
+  const mintA = {
+    address: params.mintAddress.toBase58(),
+    programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    decimals: params.mintDecimals,
+  };
+  const mintB = {
+    address: "So11111111111111111111111111111111111111112",
+    programId: "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+    decimals: 9,
+  };
+
+  const feeConfigs = await raydium.api.getCpmmConfigs();
+  if (isDevnet) {
+    feeConfigs.forEach((cfg: any) => {
+      cfg.id = getCpmmPdaAmmConfigId(
+        DEVNET_PROGRAM_ID.CREATE_CPMM_POOL_PROGRAM,
+        cfg.index
+      ).publicKey.toBase58();
+    });
+  }
+
+  const programId = isDevnet
+    ? DEVNET_PROGRAM_ID.CREATE_CPMM_POOL_PROGRAM
+    : CREATE_CPMM_POOL_PROGRAM;
+  const poolFeeAccount = isDevnet
+    ? DEVNET_PROGRAM_ID.CREATE_CPMM_POOL_FEE_ACC
+    : CREATE_CPMM_POOL_FEE_ACC;
+
+  const mintAAmount = new BN(params.tokenAmount);
+  const mintBAmount = new BN(Math.floor(params.solAmount * LAMPORTS_PER_SOL));
+
+  logger.info(
+    { mintA: mintA.address, tokenAmount: params.tokenAmount, solAmount: params.solAmount },
+    "Building real Raydium CPMM pool creation transaction"
+  );
+
+  const { transaction, extInfo } = await raydium.cpmm.createPool({
+    programId,
+    poolFeeAccount,
+    mintA,
+    mintB,
+    mintAAmount,
+    mintBAmount,
+    startTime: new BN(0),
+    feeConfig: feeConfigs[0],
+    associatedOnly: false,
+    ownerInfo: { useSOLBalance: true },
+    txVersion: TxVersion.LEGACY,
+  });
+
+  return {
+    transaction: transaction as Transaction,
+    poolId: extInfo.address.poolId.toBase58(),
+  };
+}
+
+// ============================================================
+// 1. Stub legacy (ya no se usa en el flujo real)
 // ============================================================
 
-/**
- * Esta función inicializa el SDK de Raydium.
- * IMPORTANTE: Ajusta la versión del SDK según la que tengas instalada.
- * Ejecuta: npm list @raydium-io/raydium-sdk-v2
- */
 async function getRaydiumInstance() {
-  // Si tienes el SDK instalado, descomenta esto:
-  // const { Raydium } = await import('@raydium-io/raydium-sdk-v2');
-  // return await Raydium.load({
-  //   connection,
-  //   owner: new PublicKey(process.env.SERVER_WALLET_PUBLIC_KEY!),
-  // });
-
-  // Mientras tanto, este stub permite que el código compile
-  logger.warn('Raydium SDK not fully configured yet');
+  logger.warn('Raydium SDK not fully configured yet (stub legacy)');
   return {
     liquidity: {
       getPoolInfo: async () => ({
@@ -44,10 +126,6 @@ async function getRaydiumInstance() {
   };
 }
 
-// ============================================================
-// 2. CREACIÓN DE POOL (para el launchpad)
-// ============================================================
-
 export interface BuildPoolInstructionsParams {
   userWallet: PublicKey;
   mint: PublicKey;
@@ -55,57 +133,22 @@ export interface BuildPoolInstructionsParams {
   totalSupply: number;
 }
 
-/**
- * Construye las instrucciones para crear un pool en Raydium.
- * Esta es la función que usa tu tokenController.ts para lanzar tokens.
- */
 export async function buildRaydiumPoolInstructions(
   params: BuildPoolInstructionsParams
 ): Promise<TransactionInstruction[]> {
   try {
-    logger.info(
-      { 
-        mint: params.mint.toBase58(), 
-        liquiditySol: params.liquiditySol,
-        totalSupply: params.totalSupply 
-      },
-      "Building Raydium pool instructions"
-    );
-
-    // ============================================================
-    // ⚠️ INTEGRATION POINT — Reemplaza este stub con el SDK real
-    // ============================================================
-    // 
-    // Para integrar el SDK real:
-    // 1. Instala: npm install @raydium-io/raydium-sdk-v2
-    // 2. Descomenta el código de getRaydiumInstance() arriba
-    // 3. Usa el SDK para crear el pool:
-    //
-    // const raydium = await getRaydiumInstance();
-    // const pool = await raydium.createPool({
-    //   mintA: params.mint,
-    //   mintB: new PublicKey('So11111111111111111111111111111111111111112'), // SOL
-    //   amountA: params.totalSupply,
-    //   amountB: params.liquiditySol * LAMPORTS_PER_SOL,
-    //   startPrice: 0.000001,
-    //   feeTier: 0.01,
-    // });
-    // return pool.tx.instructions;
-    //
-    // ============================================================
-
-    // Stub: devolvemos una instrucción dummy para que el flujo funcione
-    // En producción, esto debe ser reemplazado por el código real de Raydium
+    const MEMO_PROGRAM_ID = new PublicKey('MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr');
     const dummyInstruction = new TransactionInstruction({
       keys: [
         { pubkey: params.userWallet, isSigner: true, isWritable: true },
-        { pubkey: params.mint, isSigner: false, isWritable: true },
       ],
-      programId: new PublicKey('So11111111111111111111111111111111111111112'),
-      data: Buffer.from([]),
+      programId: MEMO_PROGRAM_ID,
+      data: Buffer.from(
+        `launchpad-stub-pool:${params.mint.toBase58()}:${params.liquiditySol}SOL`,
+        'utf-8'
+      ),
     });
-
-    logger.warn("Using dummy Raydium pool instructions — replace with real SDK call");
+    logger.warn("Using dummy Raydium pool instructions (legacy, unused path)");
     return [dummyInstruction];
   } catch (error: any) {
     logger.error({ error: error.message }, "Failed to build Raydium pool instructions");
@@ -114,122 +157,111 @@ export async function buildRaydiumPoolInstructions(
 }
 
 // ============================================================
-// 3. RETIRO DE LIQUIDEZ CON COMISIÓN DEL 10%
+// 2. RETIRO DE LIQUIDEZ CON COMISIÓN DEL 10% — AHORA REAL
 // ============================================================
+//
+// FIX (07/10 #1): cálculo movido de BN.js a BigInt nativo (evita overflow
+// de 53 bits en .toNumber()).
+// FIX (07/10 #2): el SDK de Raydium reordena los mints internamente por
+// dirección (no respeta el orden mintA/mintB que se usó al crear el pool).
+// Por eso NO se puede asumir fijo que "baseReserve" o "quoteReserve" es
+// SOL — hay que comparar contra la dirección real de Wrapped SOL
+// (So11111111111111111111111111111111111111112) usando poolInfo.mintA /
+// poolInfo.mintB para saber cuál lado es SOL en ESTE pool específico.
+const SOL_MINT_ADDRESS = "So11111111111111111111111111111111111111112";
 
-/**
- * Obtiene información del pool (stub)
- * En producción, esto usa el SDK real de Raydium
- */
-async function getPoolInfo(connection: Connection, poolAddress: PublicKey) {
-  // Stub: datos simulados
-  return {
-    lpSupply: 1000000,
-    solReserve: 100,
-    tokenReserve: 1000000,
-  };
-}
-
-/**
- * Calcula el valor de LP tokens en SOL (stub)
- * En producción, esto debe calcularse con datos reales del pool
- */
-async function getLpValueInSol(
-  connection: Connection,
-  poolAddress: PublicKey,
-  lpAmount: number
-): Promise<number> {
-  const poolInfo = await getPoolInfo(connection, poolAddress);
-  const totalLpSupply = poolInfo.lpSupply;
-  const solReserve = poolInfo.solReserve;
-  const lpRatio = lpAmount / totalLpSupply;
-  const solValue = solReserve * lpRatio;
-  return solValue;
-}
-
-/**
- * Prepara el retiro de liquidez con comisión del 10%
- * - 90% va al usuario
- * - 10% va a la plataforma (fee wallet)
- */
 export async function withdrawLiquidityWithFee(
   connection: Connection,
   poolAddress: PublicKey,
   userWallet: PublicKey,
-  lpTokenAmount: number,
+  lpTokenAmount: string,
   platformFeeWallet: PublicKey
 ): Promise<{
   transaction: Transaction;
-  userAmount: number;
-  platformFee: number;
+  userAmountSol: number;
+  platformFeeSol: number;
 }> {
   try {
-    // 1. Calcular comisión (10%)
-    const feePercentage = 0.10;
-    const platformFee = lpTokenAmount * feePercentage;
-    const userAmount = lpTokenAmount - platformFee;
+    const { Raydium, TxVersion } = await import("@raydium-io/raydium-sdk-v2");
+    const isDevnet = connection.rpcEndpoint.includes("devnet");
+
+    const raydium = await Raydium.load({
+      connection,
+      owner: userWallet,
+      cluster: isDevnet ? "devnet" : "mainnet",
+      disableLoadToken: true,
+    });
+
+    const poolId = poolAddress.toBase58();
+
+    const { poolInfo, poolKeys, rpcData } = await raydium.cpmm.getPoolInfoFromRpc(poolId);
+
+    const mintAAddress = (poolInfo as any)?.mintA?.address;
+    const mintBAddress = (poolInfo as any)?.mintB?.address;
+    const mintAIsSol = mintAAddress === SOL_MINT_ADDRESS;
 
     logger.info(
       {
-        poolAddress: poolAddress.toBase58(),
-        lpTokenAmount,
-        userAmount,
-        platformFee,
+        lpAmountRaw: lpTokenAmount,
+        lpSupplyRaw: rpcData.lpAmount?.toString(),
+        baseReserveRaw: (rpcData as any).baseReserve?.toString(),
+        quoteReserveRaw: (rpcData as any).quoteReserve?.toString(),
+        mintAAddress,
+        mintBAddress,
+        mintAIsSol,
       },
-      "Preparing withdrawal with 10% fee"
+      "DEBUG withdraw raw values"
     );
 
-    // 2. Obtener instancia de Raydium
-    const raydium = await getRaydiumInstance();
+    // --- Cálculo con BigInt nativo ---
+    const lpAmountBig = BigInt(lpTokenAmount);
+    const lpSupplyBig = BigInt(rpcData.lpAmount.toString());
 
-    // 3. Obtener información del pool
-    const poolInfo = await raydium.liquidity.getPoolInfo(poolAddress);
-    if (!poolInfo) {
-      throw new Error('Pool not found');
-    }
+    // Si mintA es SOL, la reserva de SOL está en "baseReserve".
+    // Si no, mintB es SOL y la reserva está en "quoteReserve".
+    const solVaultRaw = mintAIsSol
+      ? (rpcData as any).baseReserve?.toString() ?? "0"
+      : (rpcData as any).quoteReserve?.toString() ?? "0";
+    const solVaultBig = BigInt(solVaultRaw);
 
-    // ============================================================
-    // ⚠️ INTEGRATION POINT — Reemplaza esto con el SDK real
-    // ============================================================
-    // 
-    // const withdrawTx = await raydium.liquidity.withdraw({
-    //   poolAddress: poolAddress,
-    //   lpTokenAmount: lpTokenAmount,
-    //   slippage: 0.01,
-    // });
-    //
-    // ============================================================
+    const proportionalLamportsBig =
+      lpSupplyBig === BigInt(0) ? BigInt(0) : (solVaultBig * lpAmountBig) / lpSupplyBig;
 
-    // Stub: transacción dummy
-    const withdrawTx = new Transaction();
+    const totalSolOut = Number(proportionalLamportsBig) / LAMPORTS_PER_SOL;
+    const platformFeeSol = totalSolOut * 0.10;
+    const userAmountSol = totalSolOut * 0.90;
+    // --- fin cálculo BigInt ---
 
-    // 4. Calcular el valor de la comisión en SOL
-    const lpValueInSol = await getLpValueInSol(connection, poolAddress, platformFee);
-    
-    // 5. Crear instrucción para transferir la comisión (10%)
+    logger.info(
+      { poolId, lpTokenAmount, totalSolOut, userAmountSol, platformFeeSol },
+      "Preparing REAL withdrawal with 10% fee"
+    );
+
+    const lpAmount = new BN(lpTokenAmount);
+
+    const { transaction } = await raydium.cpmm.withdrawLiquidity({
+      poolInfo,
+      poolKeys,
+      lpAmount,
+      baseMinAmount: new BN(0),
+      quoteMinAmount: new BN(0),
+      ownerInfo: { useSOLBalance: true },
+      txVersion: TxVersion.LEGACY,
+    });
+
+    const tx = transaction as Transaction;
+
     const feeInstruction = SystemProgram.transfer({
       fromPubkey: userWallet,
       toPubkey: platformFeeWallet,
-      lamports: Math.floor(lpValueInSol * LAMPORTS_PER_SOL),
+      lamports: Math.max(0, Math.floor(platformFeeSol * LAMPORTS_PER_SOL)),
     });
-
-    // 6. Combinar ambas transacciones
-    const transaction = new Transaction();
-    transaction.add(withdrawTx);
-    transaction.add(feeInstruction);
-
-    logger.info(
-      {
-        feeLamports: Math.floor(lpValueInSol * LAMPORTS_PER_SOL),
-        feeSol: lpValueInSol,
-      },
-      "Withdrawal transaction prepared"
-    );
+    tx.add(feeInstruction);
 
     return {
-      transaction,
-      userAmount,
-      platformFee,
+      transaction: tx,
+      userAmountSol,
+      platformFeeSol,
     };
   } catch (error: any) {
     logger.error(
@@ -241,10 +273,11 @@ export async function withdrawLiquidityWithFee(
 }
 
 // ============================================================
-// 4. EXPORT DEFAULT
+// 3. EXPORT DEFAULT
 // ============================================================
 
 export default {
+  createRaydiumCpmmPool,
   buildRaydiumPoolInstructions,
   withdrawLiquidityWithFee,
 };

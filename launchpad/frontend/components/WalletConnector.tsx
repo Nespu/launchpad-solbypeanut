@@ -1,6 +1,18 @@
 'use client';
 
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
+import dynamic from 'next/dynamic';
+
+// WalletMultiButton renderiza distinto en el servidor (no sabe si hay wallet
+// conectada) que en el navegador (donde sí lo sabe) → eso causa un error de
+// hidratación de React. La solución es que este botón NUNCA se renderice en
+// el servidor, solo en el cliente, con { ssr: false }.
+const WalletMultiButton = dynamic(
+  () =>
+    import('@solana/wallet-adapter-react-ui').then(
+      (mod) => mod.WalletMultiButton
+    ),
+  { ssr: false }
+);
 
 export default function WalletConnector() {
   return (

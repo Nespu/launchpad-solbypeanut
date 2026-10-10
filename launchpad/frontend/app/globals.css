@@ -5,9 +5,24 @@
 @import url('https://api.fontshare.com/v2/css?f[]=author@400,500,600,700&display=swap');
 @import url('https://fonts.googleapis.com/css2?family=Unbounded:wght@400;500;600;700;800&family=Martian+Mono:wght@400;500;600;700&display=swap');
 
+:root {
+  --bg: #050608;
+  --surface: #0e1013;
+  --surface-2: #16191d;
+  --line: #23272c;
+  --text: #F2F0EA;
+  --muted: #8a8f8a;
+  /* Acento tomado del logo (la W de circuito): un verde-lima profundo, no
+     el típico neón plano — con un violeta frío como contraste secundario. */
+  --wire-green: #7CFF5C;
+  --wire-green-dim: #1a2b14;
+  --wire-violet: #8B7CFF;
+  --success: #3ddc84;
+}
+
 body {
-  background: #050608;
-  color: #F2F0EA;
+  background: var(--bg);
+  color: var(--text);
   font-family: 'Author', sans-serif;
 }
 
@@ -17,4 +32,20 @@ h1, h2, h3, .font-display {
 
 .font-mono {
   font-family: 'Martian Mono', monospace;
+}
+
+.glass-card {
+  background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+  border: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+}
+
+.wire-input {
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  color: var(--text);
+}
+.wire-input:focus {
+  outline: none;
+  border-color: var(--wire-green);
 }
