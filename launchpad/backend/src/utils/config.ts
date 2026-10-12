@@ -86,13 +86,18 @@ if (!/^rediss?:\/\//i.test(redisUrl) || (isProduction && !/^rediss:\/\//i.test(r
   throw new Error("REDIS_URL must use rediss:// in production and redis:// or rediss:// otherwise");
 }
 
+const rpcWebsocket = process.env.RPC_WEBSOCKET || "";
+if (rpcWebsocket && !(isProduction ? /^wss:\/\//i : /^wss?:\/\//i).test(rpcWebsocket)) {
+  throw new Error("RPC_WEBSOCKET must use wss:// in production and ws:// or wss:// otherwise");
+}
+
 export const config = {
   port,
   isProduction,
   trustProxyHops,
   corsOrigins,
   rpcEndpoint,
-  rpcWebsocket: process.env.RPC_WEBSOCKET || "",
+  rpcWebsocket,
   platformFeeWallet,
   serverWalletPrivateKey,
   pinataJwt: process.env.PINATA_JWT || "",
