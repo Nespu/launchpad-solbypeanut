@@ -52,6 +52,47 @@ export function createGetMyPoolsHandler(prisma: TokenStore) {
   };
 }
 
+export function createGetTokenDetailsHandler(prisma: TokenStore) {
+  return async (req: Request, res: Response): Promise<Response> => {
+    let mintAddress: string;
+    try {
+      mintAddress = new PublicKey(req.params.mintAddress).toBase58();
+    } catch {
+      return res.status(400).json({ success: false, error: 'Invalid mintAddress' });
+    }
+
+    try {
+      const token = await prisma.token.findUnique({
+        where: { mintAddress },
+        select: {
+          mintAddress: true,
+          name: true,
+          symbol: true,
+          description: true,
+          imageUrl: true,
+          totalSupply: true,
+          liquiditySol: true,
+          creatorWallet: true,
+          createdAt: true,
+          txHash: true,
+          poolAddress: true,
+          status: true,
+        },
+      });
+
+      if (!token) return res.status(404).json({ success: false, error: 'Token not found' });
+
+      return res.status(200).json({
+        success: true,
+        token: { ...token, totalSupply: token.totalSupply.toString() },
+      });
+    } catch (error: any) {
+      logger.error({ errorName: error instanceof Error ? error.name : 'UnknownError' }, 'Error fetching token details');
+      return res.status(500).json({ success: false, error: 'Unable to fetch token details' });
+    }
+  };
+}
+
 export function createUpdateWithdrawalResultHandler(prisma: WithdrawalStore, connection: Connection) {
   return async (req: Request, res: Response): Promise<Response> => {
     try {

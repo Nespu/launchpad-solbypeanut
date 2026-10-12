@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Transaction } from '@solana/web3.js';
 import TrustRing from './TrustRing';
@@ -454,6 +455,12 @@ export default function TokenForm() {
             >
               + Create Liquidity Pool
             </button>
+            <Link
+              href={`/token/${result.mintAddress}`}
+              className="block text-center w-full py-2.5 rounded-lg text-sm wire-input mb-2"
+            >
+              Ver detalles del token
+            </Link>
             <a
               href={`https://explorer.solana.com/tx/${result.txId}?cluster=devnet`}
               target="_blank"

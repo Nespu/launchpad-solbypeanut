@@ -6,6 +6,7 @@ import {
   submitPoolTransaction,
   getLpBalance,
   getMyPools,
+  getTokenDetails,
   updateWithdrawalResult,
   getFeeConfig,
 } from '../controllers/tokenController';
@@ -19,6 +20,7 @@ export const tokenRouter = createTokenRouter({
   submitPoolTransaction,
   getLpBalance,
   getMyPools,
+  getTokenDetails,
   updateWithdrawalResult,
   getFeeConfig,
 });

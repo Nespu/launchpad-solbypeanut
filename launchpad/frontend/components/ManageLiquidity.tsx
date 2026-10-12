@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useWallet } from '@solana/wallet-adapter-react';
 import WithdrawLiquidity from './WithdrawLiquidity';
 
@@ -109,11 +110,21 @@ export default function ManageLiquidity() {
                   />
                 )}
                 <div className="flex-1 min-w-0">
-                  <h3 className="font-display font-semibold">{pool.name} ({pool.symbol})</h3>
+                  <h3 className="font-display font-semibold">
+                    <Link href={`/token/${pool.mintAddress}`} className="hover:text-[var(--wire-green)]">
+                      {pool.name} ({pool.symbol})
+                    </Link>
+                  </h3>
                   <p className="text-xs text-[var(--muted)] font-mono break-all mt-1">
                     Pool: {pool.poolAddress}
                   </p>
                 </div>
+                <Link
+                  href={`/token/${pool.mintAddress}`}
+                  className="py-2.5 px-4 rounded-lg font-medium text-sm text-center wire-input"
+                >
+                  Ver detalles
+                </Link>
                 <button
                   onClick={() => setSelectedPool(pool)}
                   className="py-2.5 px-4 rounded-lg font-medium text-sm"

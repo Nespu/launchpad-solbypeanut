@@ -20,6 +20,7 @@ export type TokenRouteHandlers = {
   submitPoolTransaction: RequestHandler;
   getLpBalance: RequestHandler;
   getMyPools: RequestHandler;
+  getTokenDetails: RequestHandler;
   updateWithdrawalResult: RequestHandler;
   getFeeConfig: RequestHandler;
 };
@@ -41,6 +42,7 @@ export function createTokenRouter(
   router.post('/withdrawal-result', rateLimitFactory('withdrawal-result', 20, 15 * 60 * 1000), validateBody(updateWithdrawalResultSchema), handlers.updateWithdrawalResult);
   router.get('/lp-balance', validateQuery(lpBalanceQuerySchema), handlers.getLpBalance);
   router.get('/my-pools', validateQuery(myPoolsQuerySchema), handlers.getMyPools);
+  router.get('/token/:mintAddress', handlers.getTokenDetails);
 
   return router;
 }

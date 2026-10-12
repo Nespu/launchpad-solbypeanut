@@ -40,6 +40,7 @@ function createHandlers(calls: { count: number; lastBody?: unknown }): TokenRout
     submitPoolTransaction: handler,
     getLpBalance: handler,
     getMyPools: handler,
+    getTokenDetails: handler,
     updateWithdrawalResult: handler,
     getFeeConfig: handler,
   };

@@ -19,7 +19,11 @@ import { connection, getServerKeypair, platformFeeWallet } from '../utils/solana
 import { config } from '../utils/config';
 import { cleanMetadataText } from '../utils/metadataText';
 import { PublicError } from '../utils/publicError';
-import { createGetMyPoolsHandler, createUpdateWithdrawalResultHandler } from './tokenControllerHandlers';
+import {
+  createGetMyPoolsHandler,
+  createGetTokenDetailsHandler,
+  createUpdateWithdrawalResultHandler,
+} from './tokenControllerHandlers';
 
 const prisma = new PrismaClient();
 
@@ -438,6 +442,7 @@ export const submitPoolTransaction = async (req: Request, res: Response): Promis
   }
 };
 export const getMyPools = createGetMyPoolsHandler(prisma);
+export const getTokenDetails = createGetTokenDetailsHandler(prisma);
 export const withdrawLiquidity = async (req: Request, res: Response): Promise<Response> => {
   try {
     const { userWallet, poolAddress, lpTokenAmount } = req.body;
