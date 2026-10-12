@@ -52,6 +52,42 @@ export function createGetMyPoolsHandler(prisma: TokenStore) {
   };
 }
 
+export function createGetMyTokensHandler(prisma: TokenStore) {
+  return async (req: Request, res: Response): Promise<Response> => {
+    const { userWallet } = req.query;
+    if (typeof userWallet !== 'string' || !userWallet) {
+      return res.status(400).json({ success: false, error: 'Missing required query param: userWallet' });
+    }
+
+    let creatorWallet: string;
+    try {
+      creatorWallet = new PublicKey(userWallet).toBase58();
+    } catch {
+      return res.status(400).json({ success: false, error: 'Invalid userWallet' });
+    }
+
+    try {
+      const tokens = await prisma.token.findMany({
+        where: { creatorWallet },
+        select: {
+          mintAddress: true,
+          name: true,
+          symbol: true,
+          imageUrl: true,
+          poolAddress: true,
+          status: true,
+          createdAt: true,
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      return res.status(200).json({ success: true, tokens });
+    } catch (error) {
+      logger.error({ errorName: error instanceof Error ? error.name : 'UnknownError' }, 'Error fetching user tokens');
+      return res.status(500).json({ success: false, error: 'Unable to fetch user tokens' });
+    }
+  };
+}
+
 export function createGetTokenDetailsHandler(prisma: TokenStore) {
   return async (req: Request, res: Response): Promise<Response> => {
     let mintAddress: string;

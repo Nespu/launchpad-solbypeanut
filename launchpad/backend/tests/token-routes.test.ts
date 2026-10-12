@@ -40,6 +40,7 @@ function createHandlers(calls: { count: number; lastBody?: unknown }): TokenRout
     submitPoolTransaction: handler,
     getLpBalance: handler,
     getMyPools: handler,
+    getMyTokens: handler,
     getTokenDetails: handler,
     updateWithdrawalResult: handler,
     getFeeConfig: handler,
@@ -174,3 +175,4 @@ test('my pools route validates the wallet query before calling its handler', asy
     await api.close();
   }
 });
+

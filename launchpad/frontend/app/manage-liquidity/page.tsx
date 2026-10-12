@@ -4,6 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import WalletConnector from '../../components/WalletConnector';
 import ManageLiquidity from '../../components/ManageLiquidity';
+import TokenHistory from '../../components/TokenHistory';
 
 export default function ManageLiquidityPage() {
   return (
@@ -25,6 +26,7 @@ export default function ManageLiquidityPage() {
           </nav>
         </header>
         <ManageLiquidity />
+        <TokenHistory />
       </div>
     </main>
   );

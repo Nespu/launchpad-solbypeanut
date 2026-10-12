@@ -71,6 +71,7 @@ export const updateWithdrawalResultSchema = z.object({
 
 export const lpBalanceQuerySchema = z.object({ userWallet: publicKeySchema, poolAddress: publicKeySchema });
 export const myPoolsQuerySchema = z.object({ userWallet: publicKeySchema });
+export const myTokensQuerySchema = z.object({ userWallet: publicKeySchema });
 
 export type CreateTokenInput = z.infer<typeof createTokenSchema>;
 export type SubmitTransactionInput = z.infer<typeof submitTransactionSchema>;

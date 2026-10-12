@@ -10,6 +10,7 @@ import {
   updateWithdrawalResultSchema,
   lpBalanceQuerySchema,
   myPoolsQuerySchema,
+  myTokensQuerySchema,
 } from '../utils/schemas';
 
 export type TokenRouteHandlers = {
@@ -20,6 +21,7 @@ export type TokenRouteHandlers = {
   submitPoolTransaction: RequestHandler;
   getLpBalance: RequestHandler;
   getMyPools: RequestHandler;
+  getMyTokens: RequestHandler;
   getTokenDetails: RequestHandler;
   updateWithdrawalResult: RequestHandler;
   getFeeConfig: RequestHandler;
@@ -42,6 +44,7 @@ export function createTokenRouter(
   router.post('/withdrawal-result', rateLimitFactory('withdrawal-result', 20, 15 * 60 * 1000), validateBody(updateWithdrawalResultSchema), handlers.updateWithdrawalResult);
   router.get('/lp-balance', validateQuery(lpBalanceQuerySchema), handlers.getLpBalance);
   router.get('/my-pools', validateQuery(myPoolsQuerySchema), handlers.getMyPools);
+  router.get('/my-tokens', validateQuery(myTokensQuerySchema), handlers.getMyTokens);
   router.get('/token/:mintAddress', handlers.getTokenDetails);
 
   return router;

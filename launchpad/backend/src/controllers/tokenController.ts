@@ -21,6 +21,7 @@ import { cleanMetadataText } from '../utils/metadataText';
 import { PublicError } from '../utils/publicError';
 import {
   createGetMyPoolsHandler,
+  createGetMyTokensHandler,
   createGetTokenDetailsHandler,
   createUpdateWithdrawalResultHandler,
 } from './tokenControllerHandlers';
@@ -442,6 +443,7 @@ export const submitPoolTransaction = async (req: Request, res: Response): Promis
   }
 };
 export const getMyPools = createGetMyPoolsHandler(prisma);
+export const getMyTokens = createGetMyTokensHandler(prisma);
 export const getTokenDetails = createGetTokenDetailsHandler(prisma);
 export const withdrawLiquidity = async (req: Request, res: Response): Promise<Response> => {
   try {
