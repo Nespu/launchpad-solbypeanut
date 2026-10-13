@@ -148,6 +148,7 @@ export default function TokenForm() {
     try {
       const createRes = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/create-token`, {
         method: 'POST',
+        credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userWallet: publicKey.toBase58(),

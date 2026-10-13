@@ -46,6 +46,10 @@ export async function connectRateLimitStore(timeoutMs = 5000): Promise<void> {
   }
 }
 
+export async function disconnectRateLimitStore(): Promise<void> {
+  if (redis && redis.status !== 'end') await redis.quit();
+}
+
 const incrementScript = `
 local count = redis.call('INCR', KEYS[1])
 if count == 1 then
@@ -63,10 +67,11 @@ export function createRateLimit(
   max: number,
   windowMs: number,
   counter: RateLimitCounter = redisCounter,
+  subject: (req: import('express').Request) => string | undefined = () => undefined,
 ): RequestHandler {
   return async (req, res, next) => {
-    const address = req.ip || req.socket.remoteAddress || 'unknown';
-    const addressHash = createHash('sha256').update(address).digest('hex');
+    const identity = subject(req) || req.ip || req.socket.remoteAddress || 'unknown';
+    const addressHash = createHash('sha256').update(identity).digest('hex');
     const key = `wire:rate-limit:${prefix}:${addressHash}`;
 
     try {

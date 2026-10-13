@@ -66,6 +66,9 @@ if (isProduction && !corsOriginsValue) {
   throw new Error("CORS_ORIGINS is required in production");
 }
 const corsOrigins = corsOriginsValue ? corsOriginsValue.split(",").map((origin) => origin.trim()).filter(Boolean) : [];
+if (isProduction && corsOrigins.length === 0) {
+  throw new Error("CORS_ORIGINS must contain at least one valid origin in production");
+}
 for (const origin of corsOrigins) {
   let parsedOrigin: URL;
   try {
@@ -91,6 +94,11 @@ if (rpcWebsocket && !(isProduction ? /^wss:\/\//i : /^wss?:\/\//i).test(rpcWebso
   throw new Error("RPC_WEBSOCKET must use wss:// in production and ws:// or wss:// otherwise");
 }
 
+const pinataJwt = process.env.PINATA_JWT?.trim() || "";
+if (isProduction && !pinataJwt) {
+  throw new Error("PINATA_JWT is required in production");
+}
+
 export const config = {
   port,
   isProduction,
@@ -100,7 +108,7 @@ export const config = {
   rpcWebsocket,
   platformFeeWallet,
   serverWalletPrivateKey,
-  pinataJwt: process.env.PINATA_JWT || "",
+  pinataJwt,
   pinataGateway: process.env.PINATA_GATEWAY || "gateway.pinata.cloud",
   databaseUrl: required("DATABASE_URL"),
   redisUrl,

@@ -1,11 +1,10 @@
 import express from 'express';
 import cors from 'cors';
-import { tokenRouter } from './routes/tokenRoutes';
-import { apiRateLimit, connectRateLimitStore, getRedisClient } from './middleware/rateLimit';
+import { tokenRouter, walletAuthService } from './routes/tokenRoutes';
+import { apiRateLimit, connectRateLimitStore, disconnectRateLimitStore, getRedisClient } from './middleware/rateLimit';
 import { config } from './utils/config';
 import { logger } from './utils/logger';
 import { createWalletAuthHandlers, createWalletSessionResolver } from './controllers/walletAuthController';
-import { createWalletAuthService } from './services/walletAuth';
 import { createWalletAuthRouter } from './routes/walletAuthRoutes';
 import { createGetWalletHistoryHandler } from './controllers/walletHistoryController';
 import { createWalletHistoryRouter } from './routes/walletHistoryRoutes';
@@ -39,17 +38,28 @@ app.use('/api', apiRateLimit);
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
-// Health check
-app.get('/health', (req, res) => {
+// Liveness does not depend on external services.
+app.get('/health/live', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+app.get('/health', (_req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+app.get('/health/ready', async (_req, res) => {
+  try {
+    await Promise.all([
+      prisma.$queryRaw`SELECT 1`,
+      getRedisClient().ping(),
+    ]);
+    return res.json({ status: 'ready', timestamp: new Date().toISOString() });
+  } catch (error) {
+    logger.error({ err: error }, 'Readiness check failed');
+    return res.status(503).json({ status: 'unavailable' });
+  }
 });
 
 // Rutas
 app.use('/api', tokenRouter);
-const walletAuthService = createWalletAuthService(getRedisClient(), {
-  allowedOrigins: config.corsOrigins,
-  secureCookies: config.isProduction,
-});
 app.use('/api/auth', createWalletAuthRouter(createWalletAuthHandlers(walletAuthService)));
 app.use('/api/wallet-history', createWalletHistoryRouter(
   createGetWalletHistoryHandler(prisma, createWalletSessionResolver(walletAuthService)),
@@ -64,9 +74,26 @@ async function start() {
     logger.error({ err: error }, 'Rate limit store not available at startup, requests will return 503 until it connects');
   }
 
-  app.listen(config.port, () => {
+  const server = app.listen(config.port, () => {
     logger.info(`Server running on port ${config.port}`);
   });
+
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info({ signal }, 'Shutting down server');
+    server.close(async (error) => {
+      if (error) logger.error({ err: error }, 'HTTP server shutdown failed');
+      const results = await Promise.allSettled([prisma.$disconnect(), disconnectRateLimitStore()]);
+      for (const result of results) {
+        if (result.status === 'rejected') logger.error({ err: result.reason }, 'Service shutdown failed');
+      }
+      process.exitCode = error || results.some((result) => result.status === 'rejected') ? 1 : 0;
+    });
+  };
+  process.once('SIGINT', () => shutdown('SIGINT'));
+  process.once('SIGTERM', () => shutdown('SIGTERM'));
 }
 
 void start();

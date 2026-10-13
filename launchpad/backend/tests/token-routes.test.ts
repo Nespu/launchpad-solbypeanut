@@ -4,7 +4,7 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import express, { type RequestHandler } from 'express';
 import { createRateLimit, type RateLimitCounter } from '../src/middleware/rateLimit';
-import { createTokenRouter, type RateLimitFactory, type TokenRouteHandlers } from '../src/routes/createTokenRouter';
+import { createTokenRouter, type RateLimitFactory, type TokenRouteHandlers, type WalletSessionResolver } from '../src/routes/createTokenRouter';
 
 const address = '11111111111111111111111111111111';
 
@@ -47,11 +47,11 @@ function createHandlers(calls: { count: number; lastBody?: unknown }): TokenRout
   };
 }
 
-async function startTestApi(rateLimitFactory: RateLimitFactory) {
+async function startTestApi(rateLimitFactory: RateLimitFactory, resolveWalletSession?: WalletSessionResolver) {
   const calls = { count: 0, lastBody: undefined as unknown };
   const app = express();
   app.use(express.json());
-  app.use('/api', createTokenRouter(createHandlers(calls), rateLimitFactory));
+  app.use('/api', createTokenRouter(createHandlers(calls), rateLimitFactory, resolveWalletSession));
 
   const server: Server = createServer(app);
   await new Promise<void>((resolve, reject) => {
@@ -71,6 +71,17 @@ async function startTestApi(rateLimitFactory: RateLimitFactory) {
 
 const rateLimitFactory = (counter: RateLimitCounter): RateLimitFactory =>
   (prefix, max, windowMs) => createRateLimit(prefix, max, windowMs, counter);
+
+const walletAwareRateLimitFactory = (counter: RateLimitCounter): RateLimitFactory =>
+  (prefix, max, windowMs, _counter, subject) => createRateLimit(prefix, max, windowMs, counter, subject);
+
+const validTokenRequest = (userWallet = address) => ({
+  userWallet,
+  name: 'Token',
+  symbol: 'TST',
+  totalSupply: 1000,
+  liquiditySol: 0.5,
+});
 
 test('token route validates a request and passes parsed values to its handler', async () => {
   const api = await startTestApi(rateLimitFactory(createMemoryCounter()));
@@ -100,6 +111,64 @@ test('token route validates a request and passes parsed values to its handler', 
     assert.equal(api.calls.count, 1);
     assert.equal((api.calls.lastBody as { name: string }).name, 'Token');
     assert.deepEqual((api.calls.lastBody as { securityAssets: string[] }).securityAssets, []);
+  } finally {
+    await api.close();
+  }
+});
+
+test('create token requires a wallet session before calling its handler', async () => {
+  const api = await startTestApi(rateLimitFactory(createMemoryCounter()), async () => null);
+
+  try {
+    const response = await fetch(`${api.baseUrl}/api/create-token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(validTokenRequest()),
+    });
+
+    assert.equal(response.status, 401);
+    assert.equal(api.calls.count, 0);
+  } finally {
+    await api.close();
+  }
+});
+
+test('create token rejects a session for a different wallet', async () => {
+  const api = await startTestApi(rateLimitFactory(createMemoryCounter()), async () => 'Vote111111111111111111111111111111111111111');
+
+  try {
+    const response = await fetch(`${api.baseUrl}/api/create-token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(validTokenRequest()),
+    });
+
+    assert.equal(response.status, 403);
+    assert.equal(api.calls.count, 0);
+  } finally {
+    await api.close();
+  }
+});
+
+test('create token accepts the matching wallet session and applies a wallet rate limit', async () => {
+  const api = await startTestApi(
+    walletAwareRateLimitFactory(createMemoryCounter()),
+    async (req) => req.body.userWallet,
+  );
+
+  try {
+    const statuses: number[] = [];
+    for (let index = 0; index < 6; index += 1) {
+      const response = await fetch(`${api.baseUrl}/api/create-token`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(validTokenRequest()),
+      });
+      statuses.push(response.status);
+    }
+
+    assert.deepEqual(statuses, [201, 201, 201, 201, 201, 429]);
+    assert.equal(api.calls.count, 5);
   } finally {
     await api.close();
   }

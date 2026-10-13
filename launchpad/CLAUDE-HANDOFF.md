@@ -184,3 +184,16 @@ El 2026-10-13 se implementó una identificación explícita de wallet por mensaj
 - Revisión manual visual en Devnet completada: el panel persistente muestra Phantom, dirección abreviada, estado `Identificada` y balance. El usuario pidió un airdrop de 1 SOL; el saldo cambió de 6.7956 a 7.7956 SOL sin recargar, verificando el listener de cuenta en tiempo real. El usuario confirmó que `Identificada` persistió después de recargar.
 - El nombre que muestra la UI es el proveedor (por ejemplo, Phantom) junto con la dirección abreviada; Wallet Adapter no expone el apodo interno de la cuenta de Phantom.
 - Pendiente antes de desplegar: elegir hosting y dominios. Si frontend y API están en sitios distintos, revisar política `SameSite`/cookies y CSRF con los dominios reales; no desplegar esta configuración a Mainnet todavía.
+
+## Guardrails de preparación para producción (commit local, sin push)
+
+El 2026-10-13 se cerraron varios hallazgos de la revisión estática. Estos cambios están en el working tree y aún no se han commiteado ni subido:
+
+- `backend/src/utils/config.ts`: producción ahora exige `PINATA_JWT` y al menos un origen CORS real en `CORS_ORIGINS`; los valores vacíos/comas ya no pasan como configuración válida. No se abrió ni modificó `backend/.env`.
+- `GET /health/live` es una comprobación de proceso; `GET /health/ready` prueba Postgres y Redis y responde 503 si alguno no está disponible, sin filtrar detalles al cliente. `/health` conserva compatibilidad como liveness.
+- El backend cierra el servidor HTTP, Prisma y Redis al recibir SIGINT/SIGTERM.
+- La creación de token requiere sesión de wallet firmada que coincida con `userWallet` antes de llamar a Pinata. El frontend envía la cookie con `credentials: 'include'`. Se conserva el límite por IP y se agrega un máximo de cinco preparaciones por wallet cada 15 minutos.
+- Typecheck `npx tsc --noEmit` pasó en backend y frontend; la suite `npm test` pasó 64/64 después de añadir cobertura de sesión ausente, wallet distinta, wallet coincidente y límite por wallet; `git diff --check` pasó. No se ejecutó `next build`.
+- Estado de Git al preparar este handoff: cambios guardados en el commit local `Harden production readiness and token creation`; árbol de trabajo limpio y rama `codex-fixes` dos commits por delante de `origin/codex-fixes`. No se hizo push.
+
+Pendiente para un despliegue concreto: elegir hosting/domino(s), configurar el número correcto de proxies confiables (`TRUST_PROXY_HOPS`), validar cookies/CORS con esos dominios, configurar probes del host a `/health/ready`, y decidir cómo limpiar uploads huérfanos de Pinata cuando se cancela una firma. Mantener Devnet; no hacer migración a Mainnet como parte de esta preparación.
