@@ -21,6 +21,15 @@ type TokenDetails = {
   status: string;
 };
 
+const STATUS_LABELS: Record<string, string> = {
+  completed: 'Completado',
+  processing: 'Procesando',
+  pending: 'Pendiente',
+  failed: 'Fallido',
+};
+
+const statusLabel = (status: string) => STATUS_LABELS[status] ?? status;
+
 const explorerAddress = (address: string) =>
   `https://explorer.solana.com/address/${encodeURIComponent(address)}?cluster=devnet`;
 
@@ -124,7 +133,7 @@ export default function TokenDetailsPage() {
                 </div>
                 <div className="flex justify-between gap-4 border-b border-white/10 pb-3">
                   <dt className="text-[var(--muted)]">Estado</dt>
-                  <dd className="capitalize">{token.status}</dd>
+                  <dd>{statusLabel(token.status)}</dd>
                 </div>
                 {token.poolAddress && token.poolAddress !== 'pending' ? (
                   <div className="flex flex-col gap-1">
