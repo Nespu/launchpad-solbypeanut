@@ -1,7 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import { tokenRouter } from './routes/tokenRoutes';
-import { apiRateLimit } from './middleware/rateLimit';
+import { apiRateLimit, connectRateLimitStore } from './middleware/rateLimit';
 import { config } from './utils/config';
 import { logger } from './utils/logger';
 
@@ -38,6 +38,17 @@ app.get('/health', (req, res) => {
 // Rutas
 app.use('/api', tokenRouter);
 
-app.listen(config.port, () => {
-  logger.info(`Server running on port ${config.port}`);
-});
+async function start() {
+  try {
+    await connectRateLimitStore();
+    logger.info('Rate limit store connected');
+  } catch (error) {
+    logger.error({ err: error }, 'Rate limit store not available at startup, requests will return 503 until it connects');
+  }
+
+  app.listen(config.port, () => {
+    logger.info(`Server running on port ${config.port}`);
+  });
+}
+
+void start();

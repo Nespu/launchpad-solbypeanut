@@ -24,6 +24,28 @@ function getRedis(): Redis {
   return redis;
 }
 
+// Conecta Redis al arrancar para que la primera peticion no falle con 503.
+// Con lazyConnect y sin cola offline, el primer comando fallaba porque
+// la conexion aun no existia.
+export async function connectRateLimitStore(timeoutMs = 5000): Promise<void> {
+  const client = getRedis();
+  if (client.status !== 'wait') return;
+
+  const connecting = client.connect();
+  connecting.catch(() => undefined);
+
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error('Tiempo de espera agotado al conectar con Redis')), timeoutMs);
+  });
+
+  try {
+    await Promise.race([connecting, timeout]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 const incrementScript = `
 local count = redis.call('INCR', KEYS[1])
 if count == 1 then
