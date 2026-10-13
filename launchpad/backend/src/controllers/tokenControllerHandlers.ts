@@ -6,6 +6,8 @@ import { logger } from '../utils/logger';
 type TokenStore = Pick<PrismaClient, 'token'>;
 type WithdrawalStore = Pick<PrismaClient, 'withdrawal'>;
 
+export const MY_TOKENS_LIMIT = 100;
+
 export function createGetMyPoolsHandler(prisma: TokenStore) {
   return async (req: Request, res: Response): Promise<Response> => {
     try {
@@ -79,6 +81,7 @@ export function createGetMyTokensHandler(prisma: TokenStore) {
           createdAt: true,
         },
         orderBy: { createdAt: 'desc' },
+        take: MY_TOKENS_LIMIT,
       });
       return res.status(200).json({ success: true, tokens });
     } catch (error) {
