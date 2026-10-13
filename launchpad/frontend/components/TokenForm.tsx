@@ -14,14 +14,17 @@ const AUTHORITIES = [
   { key: 'update', icon: '✏️', name: 'Revoke Update', desc: 'La metadata queda fija para siempre.' },
 ];
 
+const ACCEPTED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
+
+// description e imageUrl no se mandan: el servidor las lee de la metadata
+// publicada en IPFS al registrar el token.
 type PendingTokenSubmission = {
   signedTransaction: string;
   mintAddress: string;
   userWallet: string;
   name: string;
   symbol: string;
-  description: string;
-  imageUrl: string;
   totalSupply: number;
   liquiditySol: number;
 };
@@ -39,6 +42,7 @@ export default function TokenForm() {
   const [liquiditySol, setLiquiditySol] = useState('1');
   const [imageBase64, setImageBase64] = useState<string | undefined>(undefined);
   const [imagePreview, setImagePreview] = useState<string | undefined>(undefined);
+  const [imageError, setImageError] = useState('');
   const [securityAssets, setSecurityAssets] = useState<string[]>(['mint', 'freeze', 'update']);
   const [showSocials, setShowSocials] = useState(false);
   const [twitter, setTwitter] = useState('');
@@ -70,8 +74,22 @@ export default function TokenForm() {
   const formatSol = (amount: number) => `${amount.toFixed(6).replace(/\.?0+$/, '')} SOL`;
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
+    const input = e.target;
+    const file = input.files?.[0];
     if (!file) return;
+
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      setImageError('La imagen debe ser PNG, JPEG, WebP o GIF.');
+      input.value = '';
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setImageError('La imagen no puede superar 2 MB.');
+      input.value = '';
+      return;
+    }
+
+    setImageError('');
     const reader = new FileReader();
     reader.onload = () => {
       setImageBase64(reader.result as string);
@@ -154,8 +172,6 @@ export default function TokenForm() {
         userWallet: publicKey.toBase58(),
         name,
         symbol,
-        description,
-        imageUrl: createData.imageUrl,
         totalSupply: Number(totalSupply),
         liquiditySol: Number(liquiditySol),
       };
@@ -233,8 +249,15 @@ export default function TokenForm() {
                 ) : (
                   <span>Arrastrá una imagen o hacé click</span>
                 )}
-                <input type="file" accept="image/*" onChange={handleImageChange} className="hidden" />
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif"
+                  onChange={handleImageChange}
+                  className="hidden"
+                />
               </label>
+              <div className="text-[11px] text-[var(--muted)] mt-1">PNG, JPEG, WebP o GIF · hasta 2 MB</div>
+              {imageError && <div className="text-xs text-red-400 mt-1">{imageError}</div>}
             </div>
           </div>
         )}

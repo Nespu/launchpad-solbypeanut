@@ -59,6 +59,22 @@ test('create token schema rejects invalid addresses, unsafe supply, and duplicat
   assert.equal(createTokenSchema.safeParse({ ...validToken, securityAssets: ['mint', 'mint'] }).success, false);
 });
 
+test('create token schema only accepts image data URLs of supported types', () => {
+  const createInput = {
+    userWallet: address,
+    name: 'Token',
+    symbol: 'TST',
+    totalSupply: 100,
+    liquiditySol: 1,
+  };
+
+  assert.equal(createTokenSchema.safeParse({ ...createInput, imageBase64: 'data:image/png;base64,iVBORw0KGgo=' }).success, true);
+  assert.equal(createTokenSchema.safeParse({ ...createInput, imageBase64: 'data:image/svg+xml;base64,PHN2Zz4=' }).success, false);
+  assert.equal(createTokenSchema.safeParse({ ...createInput, imageBase64: 'iVBORw0KGgo=' }).success, false);
+  assert.equal(createTokenSchema.safeParse({ ...createInput, imageBase64: 'data:image/png;base64,AAAA\0' }).success, false);
+  assert.equal(createTokenSchema.safeParse({ ...createInput, imageBase64: `data:image/png;base64,${'A'.repeat(2_800_001)}` }).success, false);
+});
+
 test('free-text token fields reject null bytes and on-chain metadata cleanup removes every null byte', () => {
   const createInput = {
     userWallet: address,
@@ -78,11 +94,17 @@ test('free-text token fields reject null bytes and on-chain metadata cleanup rem
     userWallet: address,
     name: 'Token',
     symbol: 'TST',
-    imageUrl: 'https://example.com/token.png',
     totalSupply: 100,
     liquiditySol: 1,
   };
-  assert.equal(submitTransactionSchema.safeParse({ ...submitInput, description: 'desc\0ription' }).success, false);
+  // description e imageUrl ya no se aceptan al registrar: el servidor las lee de IPFS.
+  const parsedSubmit = submitTransactionSchema.parse({
+    ...submitInput,
+    description: 'desc\0ription',
+    imageUrl: 'https://evil.example.com/pixel.png',
+  });
+  assert.equal('description' in parsedSubmit, false);
+  assert.equal('imageUrl' in parsedSubmit, false);
   assert.equal(submitTransactionSchema.safeParse({ ...submitInput, copyFrom: 'mint\0address' }).success, false);
   assert.equal(cleanMetadataText('To\0ke\0n\0  '), 'Token');
 });

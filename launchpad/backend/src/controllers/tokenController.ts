@@ -14,6 +14,7 @@ import {
   buildRevokeUpdateInstruction,
 } from '../services/authorityService';
 import { uploadImageToIpfs, uploadMetadataToIpfs } from '../services/ipfsService';
+import { PLACEHOLDER_IMAGE_URL, fetchTokenMetadata, parseImageDataUrl } from '../services/tokenMetadata';
 import { logger } from '../utils/logger';
 import { connection, getServerKeypair, platformFeeWallet } from '../utils/solana';
 import { config } from '../utils/config';
@@ -56,9 +57,10 @@ export const createToken = async (req: Request, res: Response): Promise<Response
 
     let imageUrl = '';
     if (imageBase64) {
+      parseImageDataUrl(imageBase64);
       imageUrl = await uploadImageToIpfs(imageBase64);
     } else {
-      imageUrl = 'https://via.placeholder.com/200x200?text=Memecoin';
+      imageUrl = PLACEHOLDER_IMAGE_URL;
     }
 
     const metadataUri = await uploadMetadataToIpfs({ name, symbol, description: description || '', image: imageUrl });
@@ -112,6 +114,9 @@ export const createToken = async (req: Request, res: Response): Promise<Response
     });
 
   } catch (error: any) {
+    if (error instanceof PublicError) {
+      return res.status(error.status).json({ success: false, error: error.message });
+    }
     logger.error({ error: error.message }, 'Error creating token');
     return res.status(500).json({
       success: false,
@@ -122,8 +127,8 @@ export const createToken = async (req: Request, res: Response): Promise<Response
 
 export const submitTransaction = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const { signedTransaction, mintAddress, userWallet, name, symbol, description, imageUrl, totalSupply, liquiditySol, copyFrom } = req.body;
-    if (!signedTransaction || !mintAddress || !userWallet || !name || !symbol || !imageUrl || !totalSupply || !liquiditySol) {
+    const { signedTransaction, mintAddress, userWallet, name, symbol, totalSupply, liquiditySol, copyFrom } = req.body;
+    if (!signedTransaction || !mintAddress || !userWallet || !name || !symbol || !totalSupply || !liquiditySol) {
       return res.status(400).json({ success: false, error: 'Missing required fields for transaction confirmation' });
     }
 
@@ -221,12 +226,19 @@ export const submitTransaction = async (req: Request, res: Response): Promise<Re
       throw new PublicError('On-chain metadata does not match the submitted mint and creator', 400);
     }
 
+    // La descripcion y la imagen salen del JSON al que apunta la metadata
+    // on-chain, no de lo que mande el cliente.
+    const offChainMetadata = await fetchTokenMetadata(
+      cleanMetadataText(onChainMetadata.data.uri),
+      config.pinataGateway,
+    );
+
     await createTokenIdempotently(prisma.token, {
       mintAddress: mintPublicKey.toBase58(),
       name: cleanMetadataText(onChainMetadata.data.name),
       symbol: cleanMetadataText(onChainMetadata.data.symbol),
-      description: description || null,
-      imageUrl,
+      description: offChainMetadata.description || null,
+      imageUrl: offChainMetadata.image,
       totalSupply: BigInt(totalSupply),
       liquiditySol,
       creatorWallet: creatorPublicKey.toBase58(),

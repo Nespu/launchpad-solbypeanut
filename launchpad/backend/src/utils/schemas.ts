@@ -18,7 +18,11 @@ export const createTokenSchema = z.object({
   name: z.string().trim().min(1).max(64).refine(noNul, 'Null bytes are not allowed'),
   symbol: z.string().trim().min(1).max(10).refine(noNul, 'Null bytes are not allowed'),
   description: z.string().max(500).refine(noNul, 'Null bytes are not allowed').optional().default(''),
-  imageBase64: z.string().max(12_000_000).refine(noNul, 'Null bytes are not allowed').optional(),
+  imageBase64: z.string()
+    .max(2_800_000)
+    .regex(/^data:image\/(png|jpeg|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/, 'Image must be a PNG, JPEG, WebP or GIF data URL')
+    .refine(noNul, 'Null bytes are not allowed')
+    .optional(),
   totalSupply: z.number().int().positive().max(18_446_744_073).safe(),
   liquiditySol: z.number().positive().finite(),
   copyFrom: z.string().refine(noNul, 'Null bytes are not allowed').optional(),
@@ -29,14 +33,14 @@ export const createTokenSchema = z.object({
     .default([]),
 });
 
+// description e imageUrl ya no se reciben: el servidor las lee de la
+// metadata on-chain (JSON en IPFS) al registrar el token.
 export const submitTransactionSchema = z.object({
   signedTransaction: signedTransactionSchema,
   mintAddress: publicKeySchema,
   userWallet: publicKeySchema,
   name: z.string().trim().min(1).max(64).refine(noNul, 'Null bytes are not allowed'),
   symbol: z.string().trim().min(1).max(10).refine(noNul, 'Null bytes are not allowed'),
-  description: z.string().max(500).refine(noNul, 'Null bytes are not allowed').optional().default(''),
-  imageUrl: z.string().url().max(2048),
   totalSupply: z.number().int().positive().max(18_446_744_073).safe(),
   liquiditySol: z.number().positive().finite(),
   copyFrom: z.string().refine(noNul, 'Null bytes are not allowed').optional(),
