@@ -20,6 +20,7 @@ const MAX_IMAGE_BYTES = 2 * 1024 * 1024;
 // description e imageUrl no se mandan: el servidor las lee de la metadata
 // publicada en IPFS al registrar el token.
 type PendingTokenSubmission = {
+  attemptId: string;
   signedTransaction: string;
   mintAddress: string;
   userWallet: string;
@@ -161,12 +162,29 @@ export default function TokenForm() {
       });
       const createData = await createRes.json();
       if (!createData.success) throw new Error(createData.error || 'Failed to prepare token creation');
+      if (typeof createData.attemptId !== 'string') throw new Error('El servidor no devolvió el identificador del intento. Recarga y vuelve a probar.');
 
       // Esta tx ya viene con feePayer, recentBlockhash, y la firma parcial
       // del mint puestas por el backend — no tocar nada más acá.
       const tx = Transaction.from(Buffer.from(createData.transaction, 'base64'));
-      const signedTx = await signTransaction(tx);
+      let signedTx: Transaction;
+      try {
+        signedTx = await signTransaction(tx);
+      } catch (signError) {
+        void fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/token-attempt/outcome`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            attemptId: createData.attemptId,
+            userWallet: publicKey.toBase58(),
+            mintAddress: createData.mintAddress,
+            outcome: 'signature_rejected',
+          }),
+        }).catch(() => undefined);
+        throw signError;
+      }
       const payload: PendingTokenSubmission = {
+        attemptId: createData.attemptId,
         signedTransaction: signedTx.serialize().toString('base64'),
         mintAddress: createData.mintAddress,
         userWallet: publicKey.toBase58(),

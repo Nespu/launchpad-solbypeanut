@@ -36,6 +36,7 @@ export const createTokenSchema = z.object({
 // description e imageUrl ya no se reciben: el servidor las lee de la
 // metadata on-chain (JSON en IPFS) al registrar el token.
 export const submitTransactionSchema = z.object({
+  attemptId: z.string().uuid().optional(),
   signedTransaction: signedTransactionSchema,
   mintAddress: publicKeySchema,
   userWallet: publicKeySchema,
@@ -44,6 +45,13 @@ export const submitTransactionSchema = z.object({
   totalSupply: z.number().int().positive().max(18_446_744_073).safe(),
   liquiditySol: z.number().positive().finite(),
   copyFrom: z.string().refine(noNul, 'Null bytes are not allowed').optional(),
+});
+
+export const tokenAttemptOutcomeSchema = z.object({
+  attemptId: z.string().uuid(),
+  userWallet: publicKeySchema,
+  mintAddress: publicKeySchema,
+  outcome: z.enum(['signature_rejected']),
 });
 
 export const createPoolSchema = z.object({
@@ -76,6 +84,12 @@ export const updateWithdrawalResultSchema = z.object({
 export const lpBalanceQuerySchema = z.object({ userWallet: publicKeySchema, poolAddress: publicKeySchema });
 export const myPoolsQuerySchema = z.object({ userWallet: publicKeySchema });
 export const myTokensQuerySchema = z.object({ userWallet: publicKeySchema });
+export const walletAuthChallengeSchema = z.object({ wallet: publicKeySchema });
+export const walletAuthVerifySchema = z.object({
+  wallet: publicKeySchema,
+  message: z.string().min(1).max(1000).refine(noNul, 'Null bytes are not allowed'),
+  signature: z.string().regex(/^[A-Za-z0-9+/]{86}==$/, 'Invalid base64 signature'),
+});
 
 export type CreateTokenInput = z.infer<typeof createTokenSchema>;
 export type SubmitTransactionInput = z.infer<typeof submitTransactionSchema>;

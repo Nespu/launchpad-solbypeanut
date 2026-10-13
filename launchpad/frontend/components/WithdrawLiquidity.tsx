@@ -116,6 +116,7 @@ export default function WithdrawLiquidity({ poolAddress, onBack }: WithdrawLiqui
         userAmountSol: createData.userAmountSol,
         platformFeeSol: createData.platformFeeSol,
       });
+      window.dispatchEvent(new Event('wire:wallet-history-updated'));
 
       // FIX (08/10): refrescar el balance de LP real después de un retiro
       // exitoso, para que el próximo retiro no use el número viejo.

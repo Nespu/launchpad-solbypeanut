@@ -36,7 +36,22 @@ export interface BuildMintInstructionsParams {
 export interface BuildMintInstructionsResult {
   mintKeypair: Keypair;
   instructions: import("@solana/web3.js").TransactionInstruction[];
+  estimatedServerRentLamports: {
+    mint: number;
+    associatedTokenAccount: number;
+    metadata: number;
+  };
+  estimatedServerProtocolFeeLamports: {
+    metaplexMetadataCreate: number;
+  };
 }
+
+const ASSOCIATED_TOKEN_ACCOUNT_SIZE = 165;
+// Metaplex Token Metadata v2 allocates the fixed maximum metadata account size.
+// This matches the 607-byte metadata accounts created by the installed program.
+const METADATA_ACCOUNT_SIZE = 607;
+// Current Metaplex Token Metadata protocol fee for CreateMetadataAccountV3.
+const METAPLEX_METADATA_CREATE_FEE_LAMPORTS = 10_000_000;
 
 /**
  * Builds (but does not send) all instructions needed to:
@@ -60,7 +75,11 @@ export async function buildMintInstructions(
   const mintKeypair = Keypair.generate();
   const server = getServerKeypair();
 
-  const rentExemptLamports = await connection.getMinimumBalanceForRentExemption(MINT_SIZE);
+  const [rentExemptLamports, associatedTokenAccountRentLamports, metadataRentLamports] = await Promise.all([
+    connection.getMinimumBalanceForRentExemption(MINT_SIZE),
+    connection.getMinimumBalanceForRentExemption(ASSOCIATED_TOKEN_ACCOUNT_SIZE),
+    connection.getMinimumBalanceForRentExemption(METADATA_ACCOUNT_SIZE),
+  ]);
 
   const ata = getAssociatedTokenAddressSync(mintKeypair.publicKey, userWallet);
 
@@ -125,5 +144,16 @@ export async function buildMintInstructions(
     ),
   ];
 
-  return { mintKeypair, instructions };
+  return {
+    mintKeypair,
+    instructions,
+    estimatedServerRentLamports: {
+      mint: rentExemptLamports,
+      associatedTokenAccount: associatedTokenAccountRentLamports,
+      metadata: metadataRentLamports,
+    },
+    estimatedServerProtocolFeeLamports: {
+      metaplexMetadataCreate: METAPLEX_METADATA_CREATE_FEE_LAMPORTS,
+    },
+  };
 }

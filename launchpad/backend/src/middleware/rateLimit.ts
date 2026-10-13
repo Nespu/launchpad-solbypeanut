@@ -7,7 +7,7 @@ export type RateLimitCounter = (key: string, windowMs: number) => Promise<[numbe
 
 let redis: Redis | undefined;
 
-function getRedis(): Redis {
+export function getRedisClient(): Redis {
   if (!redis) {
     const { config } = require('../utils/config') as typeof import('../utils/config');
     const RedisClient = require('ioredis').default as typeof import('ioredis').default;
@@ -28,7 +28,7 @@ function getRedis(): Redis {
 // Con lazyConnect y sin cola offline, el primer comando fallaba porque
 // la conexion aun no existia.
 export async function connectRateLimitStore(timeoutMs = 5000): Promise<void> {
-  const client = getRedis();
+  const client = getRedisClient();
   if (client.status !== 'wait') return;
 
   const connecting = client.connect();
@@ -55,7 +55,7 @@ return { count, redis.call('PTTL', KEYS[1]) }
 `;
 
 const redisCounter: RateLimitCounter = async (key, windowMs) => {
-  return await getRedis().eval(incrementScript, 1, key, String(windowMs)) as [number | string, number | string];
+  return await getRedisClient().eval(incrementScript, 1, key, String(windowMs)) as [number | string, number | string];
 };
 
 export function createRateLimit(

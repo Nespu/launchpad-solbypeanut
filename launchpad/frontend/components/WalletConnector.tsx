@@ -28,5 +28,9 @@ const WalletMultiButton = dynamic(
 );
 
 export default function WalletConnector() {
-  return <WalletMultiButton className={walletButtonClass} />;
+  return (
+    <div className="flex items-center gap-2">
+      <WalletMultiButton className={walletButtonClass} />
+    </div>
+  );
 }

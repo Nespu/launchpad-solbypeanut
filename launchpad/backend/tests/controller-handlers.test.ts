@@ -50,6 +50,41 @@ test('confirmed signed transaction retry does not send the transaction again', a
   assert.equal(sent, false);
 });
 
+test('retry after a confirmed transaction and failed database write does not resend on-chain', async () => {
+  let statusCalls = 0;
+  let sendCount = 0;
+  let createCount = 0;
+  const record = { mintAddress: 'mint-retry', txHash: 'signature-retry', creatorWallet: wallet };
+  const connection = {
+    getSignatureStatuses: async () => ({
+      value: [++statusCalls === 1 ? null : { err: null, confirmationStatus: 'finalized' }],
+    }),
+    sendRawTransaction: async () => {
+      sendCount += 1;
+      return record.txHash;
+    },
+    confirmTransaction: async () => ({ value: { err: null } }),
+  } as unknown as Connection;
+  const token = {
+    findUnique: async () => null,
+    create: async () => {
+      createCount += 1;
+      if (createCount === 1) throw new Error('simulated database outage after chain confirmation');
+      return record;
+    },
+  };
+
+  await confirmSignedTransaction(connection, Buffer.from('signed'), record.txHash);
+  await assert.rejects(createTokenIdempotently(token as never, record as never), /simulated database outage/);
+
+  await confirmSignedTransaction(connection, Buffer.from('signed'), record.txHash);
+  const result = await createTokenIdempotently(token as never, record as never);
+
+  assert.deepEqual(result, record);
+  assert.equal(sendCount, 1, 'the confirmed transaction must not be broadcast again');
+  assert.equal(statusCalls, 2, 'retry should look up the existing finalized signature');
+});
+
 test('expired signed transaction asks the user to sign again', async () => {
   const connection = {
     getSignatureStatuses: async () => ({ value: [null] }),

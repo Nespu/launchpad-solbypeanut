@@ -8,6 +8,7 @@ import {
 } from "@solana/web3.js";
 import BN from "bn.js";
 import { logger } from "../utils/logger";
+import { calculateWithdrawalAmounts } from "./withdrawalMath";
 
 // ============================================================
 // 0. CREACIÓN REAL DE POOL CPMM (Stage 2, SDK real de Raydium)
@@ -199,49 +200,34 @@ export async function withdrawLiquidityWithFee(
     const mintAAddress = (poolInfo as any)?.mintA?.address;
     const mintBAddress = (poolInfo as any)?.mintB?.address;
     const mintAIsSol = mintAAddress === SOL_MINT_ADDRESS;
+    if (!mintAIsSol && mintBAddress !== SOL_MINT_ADDRESS) {
+      throw new Error("Withdrawal pool does not contain wrapped SOL");
+    }
+
+    const baseReserveRaw = (rpcData as any).baseReserve?.toString();
+    const quoteReserveRaw = (rpcData as any).quoteReserve?.toString();
+    if (baseReserveRaw === undefined || quoteReserveRaw === undefined || rpcData.lpAmount === undefined) {
+      throw new Error("Pool reserves or LP supply are unavailable");
+    }
+    const amounts = calculateWithdrawalAmounts({
+      lpAmountRaw: lpTokenAmount,
+      lpSupplyRaw: rpcData.lpAmount.toString(),
+      baseReserveRaw,
+      quoteReserveRaw,
+      solIsBase: mintAIsSol,
+    });
 
     logger.info(
       {
-        lpAmountRaw: lpTokenAmount,
-        lpSupplyRaw: rpcData.lpAmount?.toString(),
-        baseReserveRaw: (rpcData as any).baseReserve?.toString(),
-        quoteReserveRaw: (rpcData as any).quoteReserve?.toString(),
-        mintAAddress,
-        mintBAddress,
-        mintAIsSol,
+        poolId,
+        lpTokenAmount,
+        totalSolOut: amounts.totalSolOut,
+        userAmountSol: amounts.userAmountSol,
+        platformFeeSol: amounts.platformFeeSol,
+        slippagePercent: 1,
+        baseMinAmountRaw: amounts.baseMinAmountRaw.toString(),
+        quoteMinAmountRaw: amounts.quoteMinAmountRaw.toString(),
       },
-      "DEBUG withdraw raw values"
-    );
-
-    // --- Cálculo con BigInt nativo ---
-    const lpAmountBig = BigInt(lpTokenAmount);
-    const lpSupplyBig = BigInt(rpcData.lpAmount.toString());
-    if (lpAmountBig <= BigInt(0) || lpSupplyBig <= BigInt(0)) {
-      throw new Error("LP amount and pool supply must be greater than zero");
-    }
-
-    // Si mintA es SOL, la reserva de SOL está en "baseReserve".
-    // Si no, mintB es SOL y la reserva está en "quoteReserve".
-    const solVaultRaw = mintAIsSol
-      ? (rpcData as any).baseReserve?.toString() ?? "0"
-      : (rpcData as any).quoteReserve?.toString() ?? "0";
-    const solVaultBig = BigInt(solVaultRaw);
-
-    const proportionalLamportsBig =
-      lpSupplyBig === BigInt(0) ? BigInt(0) : (solVaultBig * lpAmountBig) / lpSupplyBig;
-
-    const baseReserveBig = BigInt((rpcData as any).baseReserve.toString());
-    const quoteReserveBig = BigInt((rpcData as any).quoteReserve.toString());
-    const baseMinAmountRaw = ((lpAmountBig * baseReserveBig) / lpSupplyBig * BigInt(99)) / BigInt(100);
-    const quoteMinAmountRaw = ((lpAmountBig * quoteReserveBig) / lpSupplyBig * BigInt(99)) / BigInt(100);
-
-    const totalSolOut = Number(proportionalLamportsBig) / LAMPORTS_PER_SOL;
-    const platformFeeSol = totalSolOut * 0.10;
-    const userAmountSol = totalSolOut * 0.90;
-    // --- fin cálculo BigInt ---
-
-    logger.info(
-      { poolId, lpTokenAmount, totalSolOut, userAmountSol, platformFeeSol, slippagePercent: 1, baseMinAmountRaw: baseMinAmountRaw.toString(), quoteMinAmountRaw: quoteMinAmountRaw.toString() },
       "Preparing REAL withdrawal with 10% fee"
     );
 
@@ -261,14 +247,14 @@ export async function withdrawLiquidityWithFee(
     const feeInstruction = SystemProgram.transfer({
       fromPubkey: userWallet,
       toPubkey: platformFeeWallet,
-      lamports: Math.max(0, Math.floor(platformFeeSol * LAMPORTS_PER_SOL)),
+      lamports: Number(amounts.platformFeeLamports),
     });
     tx.add(feeInstruction);
 
     return {
       transaction: tx,
-      userAmountSol,
-      platformFeeSol,
+      userAmountSol: amounts.userAmountSol,
+      platformFeeSol: amounts.platformFeeSol,
     };
   } catch (error: any) {
     logger.error(

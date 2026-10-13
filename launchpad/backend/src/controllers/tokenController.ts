@@ -29,7 +29,25 @@ import {
 
 const prisma = new PrismaClient();
 
+async function getServerLamportSpend(transaction: Transaction, signature: string): Promise<number | null> {
+  const confirmedTransaction = await connection.getTransaction(signature, {
+    commitment: 'confirmed',
+    maxSupportedTransactionVersion: 0,
+  });
+  if (!confirmedTransaction?.meta) return null;
+
+  const serverAddress = getServerKeypair().publicKey;
+  const serverIndex = transaction.compileMessage().accountKeys.findIndex((key) => key.equals(serverAddress));
+  if (serverIndex < 0) return null;
+
+  return confirmedTransaction.meta.preBalances[serverIndex] - confirmedTransaction.meta.postBalances[serverIndex];
+}
+
 export const createToken = async (req: Request, res: Response): Promise<Response> => {
+  const attemptId = randomUUID();
+  let imageBytes = 0;
+  let metadataJsonBytes = 0;
+  let pinataUploadCount = 0;
   try {
     const {
       userWallet,
@@ -57,15 +75,25 @@ export const createToken = async (req: Request, res: Response): Promise<Response
 
     let imageUrl = '';
     if (imageBase64) {
-      parseImageDataUrl(imageBase64);
+      const parsedImage = parseImageDataUrl(imageBase64);
+      imageBytes = parsedImage.buffer.byteLength;
+      pinataUploadCount += 1;
       imageUrl = await uploadImageToIpfs(imageBase64);
     } else {
       imageUrl = PLACEHOLDER_IMAGE_URL;
     }
 
-    const metadataUri = await uploadMetadataToIpfs({ name, symbol, description: description || '', image: imageUrl });
+    const offChainMetadata = { name, symbol, description: description || '', image: imageUrl };
+    metadataJsonBytes = Buffer.byteLength(JSON.stringify({ pinataContent: offChainMetadata }), 'utf8');
+    pinataUploadCount += 1;
+    const metadataUri = await uploadMetadataToIpfs(offChainMetadata);
 
-    const { mintKeypair, instructions: mintInstructions } = await buildMintInstructions({
+    const {
+      mintKeypair,
+      instructions: mintInstructions,
+      estimatedServerRentLamports,
+      estimatedServerProtocolFeeLamports,
+    } = await buildMintInstructions({
       userWallet: userPublicKey,
       name,
       symbol,
@@ -95,9 +123,36 @@ export const createToken = async (req: Request, res: Response): Promise<Response
     transaction.add(feeInstruction);
 
     transaction.feePayer = userPublicKey;
-    transaction.recentBlockhash = (await connection.getLatestBlockhash()).blockhash;
+    // Use a fresh confirmed blockhash so wallet signing starts with the full
+    // normal transaction window instead of a potentially older finalized hash.
+    transaction.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
 
     transaction.partialSign(mintKeypair, serverWallet);
+
+    const totalEstimatedServerRentLamports = Object.values(estimatedServerRentLamports).reduce((total, amount) => total + amount, 0);
+    const totalEstimatedServerProtocolFeeLamports = Object.values(estimatedServerProtocolFeeLamports).reduce((total, amount) => total + amount, 0);
+    const totalEstimatedServerCostLamports = totalEstimatedServerRentLamports + totalEstimatedServerProtocolFeeLamports;
+    const platformFeeLamports = Math.floor(totalFee * LAMPORTS_PER_SOL);
+    logger.info({
+      attemptId,
+      userWallet: userPublicKey.toBase58(),
+      mintAddress: mintKeypair.publicKey.toBase58(),
+      platformFeeLamports,
+      estimatedServerRentLamports,
+      totalEstimatedServerRentLamports,
+      totalEstimatedServerRentSol: totalEstimatedServerRentLamports / LAMPORTS_PER_SOL,
+      estimatedServerProtocolFeeLamports,
+      totalEstimatedServerProtocolFeeLamports,
+      totalEstimatedServerProtocolFeeSol: totalEstimatedServerProtocolFeeLamports / LAMPORTS_PER_SOL,
+      totalEstimatedServerCostLamports,
+      totalEstimatedServerCostSol: totalEstimatedServerCostLamports / LAMPORTS_PER_SOL,
+      estimatedGrossMarginBeforeIpfsAndInfrastructureLamports: platformFeeLamports - totalEstimatedServerCostLamports,
+      estimatedGrossMarginBeforeIpfsAndInfrastructureSol: (platformFeeLamports - totalEstimatedServerCostLamports) / LAMPORTS_PER_SOL,
+      pinataUploadCount,
+      imageBytes,
+      metadataJsonBytes,
+      totalPinataContentBytes: imageBytes + metadataJsonBytes,
+    }, 'Token creation cost estimate prepared before wallet signature');
 
     const serializedTx = transaction.serialize({
       requireAllSignatures: false,
@@ -106,6 +161,7 @@ export const createToken = async (req: Request, res: Response): Promise<Response
 
     return res.status(200).json({
       success: true,
+      attemptId,
       transaction: serializedTx.toString('base64'),
       fee: totalFee,
       mintAddress: mintKeypair.publicKey.toBase58(),
@@ -117,7 +173,13 @@ export const createToken = async (req: Request, res: Response): Promise<Response
     if (error instanceof PublicError) {
       return res.status(error.status).json({ success: false, error: error.message });
     }
-    logger.error({ error: error.message }, 'Error creating token');
+    logger.error({
+      attemptId,
+      imageBytes,
+      metadataJsonBytes,
+      pinataUploadCount,
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    }, 'Token creation preparation failed');
     return res.status(500).json({
       success: false,
       error: error.message || 'Internal server error',
@@ -126,6 +188,7 @@ export const createToken = async (req: Request, res: Response): Promise<Response
 };
 
 export const submitTransaction = async (req: Request, res: Response): Promise<Response> => {
+  const attemptId = typeof req.body?.attemptId === 'string' ? req.body.attemptId : undefined;
   try {
     const { signedTransaction, mintAddress, userWallet, name, symbol, totalSupply, liquiditySol, copyFrom } = req.body;
     if (!signedTransaction || !mintAddress || !userWallet || !name || !symbol || !totalSupply || !liquiditySol) {
@@ -210,12 +273,30 @@ export const submitTransaction = async (req: Request, res: Response): Promise<Re
     const existingToken = await prisma.token.findUnique({ where: { mintAddress: mintPublicKey.toBase58() } });
     if (existingToken) {
       if (existingToken.txHash === signature && existingToken.creatorWallet === creatorPublicKey.toBase58()) {
+        logger.info({ attemptId, userWallet: creatorPublicKey.toBase58(), mintAddress: mintPublicKey.toBase58(), txHash: signature, outcome: 'already_registered' }, 'Token creation attempt registered idempotently');
         return res.status(200).json(successPayload);
       }
       return res.status(409).json({ success: false, error: 'Token is already registered' });
     }
 
     await confirmSignedTransaction(connection, tx.serialize(), signature);
+    try {
+      const serverLamportSpend = await getServerLamportSpend(tx, signature);
+      logger.info({
+        attemptId,
+        userWallet: creatorPublicKey.toBase58(),
+        mintAddress: mintPublicKey.toBase58(),
+        txHash: signature,
+        serverLamportSpend,
+        serverSolSpend: serverLamportSpend === null ? null : serverLamportSpend / LAMPORTS_PER_SOL,
+      }, 'Token creation transaction confirmed; actual server on-chain cost measured');
+    } catch (costError) {
+      logger.warn({
+        attemptId,
+        mintAddress: mintPublicKey.toBase58(),
+        errorName: costError instanceof Error ? costError.name : 'UnknownError',
+      }, 'Token creation confirmed, but actual server on-chain cost could not be read');
+    }
 
     const [metadataAddress] = PublicKey.findProgramAddressSync(
       [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mintPublicKey.toBuffer()],
@@ -248,6 +329,8 @@ export const submitTransaction = async (req: Request, res: Response): Promise<Re
       poolAddress: null,
     });
 
+    logger.info({ attemptId, userWallet: creatorPublicKey.toBase58(), mintAddress: mintPublicKey.toBase58(), txHash: signature, outcome: 'registered' }, 'Token creation completed');
+
     return res.status(200).json(successPayload);
 
   } catch (error: any) {
@@ -257,6 +340,7 @@ export const submitTransaction = async (req: Request, res: Response): Promise<Re
     const errorId = randomUUID();
     logger.error({
       errorId,
+      attemptId,
       errorName: error instanceof Error ? error.name : 'UnknownError',
       message: error instanceof Error ? error.message : String(error),
     }, 'Error submitting transaction');

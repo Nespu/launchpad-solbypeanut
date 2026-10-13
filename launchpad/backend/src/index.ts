@@ -1,9 +1,17 @@
 import express from 'express';
 import cors from 'cors';
 import { tokenRouter } from './routes/tokenRoutes';
-import { apiRateLimit, connectRateLimitStore } from './middleware/rateLimit';
+import { apiRateLimit, connectRateLimitStore, getRedisClient } from './middleware/rateLimit';
 import { config } from './utils/config';
 import { logger } from './utils/logger';
+import { createWalletAuthHandlers, createWalletSessionResolver } from './controllers/walletAuthController';
+import { createWalletAuthService } from './services/walletAuth';
+import { createWalletAuthRouter } from './routes/walletAuthRoutes';
+import { createGetWalletHistoryHandler } from './controllers/walletHistoryController';
+import { createWalletHistoryRouter } from './routes/walletHistoryRoutes';
+import { prisma } from './utils/prisma';
+import { createTokenAttemptRouter } from './routes/tokenAttemptRoutes';
+import { reportTokenAttemptOutcome } from './controllers/tokenAttemptController';
 
 const app = express();
 const allowedOrigins = new Set(config.corsOrigins);
@@ -21,6 +29,7 @@ app.use(cors({
   origin: (origin, callback) => callback(null, !origin || allowedOrigins.has(origin)),
   methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type'],
+  credentials: true,
   maxAge: 600,
 }));
 app.use('/api', apiRateLimit);
@@ -37,6 +46,15 @@ app.get('/health', (req, res) => {
 
 // Rutas
 app.use('/api', tokenRouter);
+const walletAuthService = createWalletAuthService(getRedisClient(), {
+  allowedOrigins: config.corsOrigins,
+  secureCookies: config.isProduction,
+});
+app.use('/api/auth', createWalletAuthRouter(createWalletAuthHandlers(walletAuthService)));
+app.use('/api/wallet-history', createWalletHistoryRouter(
+  createGetWalletHistoryHandler(prisma, createWalletSessionResolver(walletAuthService)),
+));
+app.use('/api/token-attempt', createTokenAttemptRouter(reportTokenAttemptOutcome));
 
 async function start() {
   try {
