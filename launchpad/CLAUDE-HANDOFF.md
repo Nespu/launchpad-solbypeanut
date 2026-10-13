@@ -185,15 +185,39 @@ El 2026-10-13 se implementó una identificación explícita de wallet por mensaj
 - El nombre que muestra la UI es el proveedor (por ejemplo, Phantom) junto con la dirección abreviada; Wallet Adapter no expone el apodo interno de la cuenta de Phantom.
 - Pendiente antes de desplegar: elegir hosting y dominios. Si frontend y API están en sitios distintos, revisar política `SameSite`/cookies y CSRF con los dominios reales; no desplegar esta configuración a Mainnet todavía.
 
-## Guardrails de preparación para producción (commit local, sin push)
+## Guardrails de preparación para producción (commit `fc1f904`, ya subido)
 
-El 2026-10-13 se cerraron varios hallazgos de la revisión estática. Estos cambios están en el working tree y aún no se han commiteado ni subido:
+El 2026-10-13 se cerraron varios hallazgos de la revisión estática. El commit `fc1f904` quedó subido a `origin/codex-fixes` antes del trabajo de limpieza de Pinata descrito abajo:
 
 - `backend/src/utils/config.ts`: producción ahora exige `PINATA_JWT` y al menos un origen CORS real en `CORS_ORIGINS`; los valores vacíos/comas ya no pasan como configuración válida. No se abrió ni modificó `backend/.env`.
 - `GET /health/live` es una comprobación de proceso; `GET /health/ready` prueba Postgres y Redis y responde 503 si alguno no está disponible, sin filtrar detalles al cliente. `/health` conserva compatibilidad como liveness.
 - El backend cierra el servidor HTTP, Prisma y Redis al recibir SIGINT/SIGTERM.
 - La creación de token requiere sesión de wallet firmada que coincida con `userWallet` antes de llamar a Pinata. El frontend envía la cookie con `credentials: 'include'`. Se conserva el límite por IP y se agrega un máximo de cinco preparaciones por wallet cada 15 minutos.
 - Typecheck `npx tsc --noEmit` pasó en backend y frontend; la suite `npm test` pasó 64/64 después de añadir cobertura de sesión ausente, wallet distinta, wallet coincidente y límite por wallet; `git diff --check` pasó. No se ejecutó `next build`.
-- Estado de Git al preparar este handoff: cambios guardados en el commit local `Harden production readiness and token creation`; árbol de trabajo limpio y rama `codex-fixes` dos commits por delante de `origin/codex-fixes`. No se hizo push.
+- Verificación de ese commit: `npm test` 64/64, typecheck backend/frontend y `git diff --check` pasaron.
 
-Pendiente para un despliegue concreto: elegir hosting/domino(s), configurar el número correcto de proxies confiables (`TRUST_PROXY_HOPS`), validar cookies/CORS con esos dominios, configurar probes del host a `/health/ready`, y decidir cómo limpiar uploads huérfanos de Pinata cuando se cancela una firma. Mantener Devnet; no hacer migración a Mainnet como parte de esta preparación.
+Pendiente para un despliegue concreto: elegir hosting/dominios, configurar el número correcto de proxies confiables (`TRUST_PROXY_HOPS`), validar cookies/CORS con esos dominios y configurar probes del host a `/health/ready`. Mantener Devnet; no hacer migración a Mainnet como parte de esta preparación.
+
+## Limpieza de pins huérfanos de Pinata (commit local `2251860`, sin push)
+
+El 2026-10-13 se implementó el seguimiento y limpieza de archivos subidos al preparar un token:
+
+- Cada `attemptId` guarda en Redis la wallet, mint cuando ya existe, CIDs subidos y firma cuando el cliente envía la transacción.
+- Si falla la preparación antes de devolver una transacción, el servidor intenta despinnear los CIDs conocidos.
+- Cuando Phantom rechaza la firma, `/api/token-attempt/outcome` valida wallet/mint contra el intento y limpia los CIDs. El trabajo lo ejecuta el backend, no depende de mantener abierta la página.
+- Los intentos abandonados se revisan después de 24 horas; un worker ligero corre cada minuto. Si Solana confirma la firma, conserva los archivos. Si sigue procesándose, aplaza la limpieza.
+- Antes de despinnear, el backend busca referencias de imagen en la DB y referencias de metadata en tokens ya registrados on-chain. Si DB/RPC no permiten comprobarlo, no elimina ese CID en ese ciclo y vuelve a intentarlo.
+- Pinata documenta `DELETE /pinning/unpin/{CID}` para quitar el pin de la cuenta. Esto no borra el contenido de IPFS de otros nodos.
+- Pruebas unitarias añadidas para cancelación, propiedad wallet/mint, preservación de transacciones confirmadas y barrido de intentos abandonados.
+- Verificación actual: backend y frontend `npx tsc --noEmit` pasaron; backend `npm test` pasó 68/68; `git diff --check` pasó. No se ejecutaron pruebas de integración ni se despinneó ningún CID real durante la implementación.
+- Los cambios quedaron en el commit local `2251860` (`Clean up abandoned Pinata token uploads`); la rama `codex-fixes` está un commit por delante de `origin/codex-fixes`. No hacer push hasta que el usuario lo pida. No se modificaron ni limpiaron manualmente archivos existentes en Pinata.
+
+## Estado de la lista original de Claude
+
+- Imagen y descripción servidas desde metadata del servidor: implementado.
+- Historial de tokens por wallet: implementado.
+- Revisión del fee de 0.02 SOL: análisis hecho; el margen antes de Pinata/infra es estrecho y no es margen neto.
+- Escenarios de retiro: cálculos y pruebas unitarias implementados.
+- Login por firma para identificar la wallet: implementado y probado en Devnet.
+- **Rediseño visual de UI: sigue pendiente**, separado del trabajo de backend; el usuario indicó dejarlo para la etapa de UI.
+- Hosting, dominios e infraestructura de producción: dejarlos para el final; mantener Devnet entretanto.

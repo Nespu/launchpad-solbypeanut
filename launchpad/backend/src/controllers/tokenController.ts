@@ -14,6 +14,7 @@ import {
   buildRevokeUpdateInstruction,
 } from '../services/authorityService';
 import { uploadImageToIpfs, uploadMetadataToIpfs } from '../services/ipfsService';
+import { tokenAttemptCleanup } from '../services/tokenAttemptCleanupRuntime';
 import { PLACEHOLDER_IMAGE_URL, fetchTokenMetadata, parseImageDataUrl } from '../services/tokenMetadata';
 import { logger } from '../utils/logger';
 import { connection, getServerKeypair, platformFeeWallet } from '../utils/solana';
@@ -48,6 +49,8 @@ export const createToken = async (req: Request, res: Response): Promise<Response
   let imageBytes = 0;
   let metadataJsonBytes = 0;
   let pinataUploadCount = 0;
+  let attemptStarted = false;
+  const uploadedCids: string[] = [];
   try {
     const {
       userWallet,
@@ -72,13 +75,18 @@ export const createToken = async (req: Request, res: Response): Promise<Response
 
     const serverWallet = getServerKeypair();
     const userPublicKey = new PublicKey(userWallet);
+    await tokenAttemptCleanup.begin(attemptId, userPublicKey.toBase58());
+    attemptStarted = true;
 
     let imageUrl = '';
     if (imageBase64) {
       const parsedImage = parseImageDataUrl(imageBase64);
       imageBytes = parsedImage.buffer.byteLength;
       pinataUploadCount += 1;
-      imageUrl = await uploadImageToIpfs(imageBase64);
+      const uploadedImage = await uploadImageToIpfs(imageBase64);
+      imageUrl = uploadedImage.url;
+      uploadedCids.push(uploadedImage.cid);
+      await tokenAttemptCleanup.addCid(attemptId, userPublicKey.toBase58(), uploadedImage.cid);
     } else {
       imageUrl = PLACEHOLDER_IMAGE_URL;
     }
@@ -86,7 +94,10 @@ export const createToken = async (req: Request, res: Response): Promise<Response
     const offChainMetadata = { name, symbol, description: description || '', image: imageUrl };
     metadataJsonBytes = Buffer.byteLength(JSON.stringify({ pinataContent: offChainMetadata }), 'utf8');
     pinataUploadCount += 1;
-    const metadataUri = await uploadMetadataToIpfs(offChainMetadata);
+    const uploadedMetadata = await uploadMetadataToIpfs(offChainMetadata);
+    const metadataUri = uploadedMetadata.url;
+    uploadedCids.push(uploadedMetadata.cid);
+    await tokenAttemptCleanup.addCid(attemptId, userPublicKey.toBase58(), uploadedMetadata.cid);
 
     const {
       mintKeypair,
@@ -128,6 +139,11 @@ export const createToken = async (req: Request, res: Response): Promise<Response
     transaction.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
 
     transaction.partialSign(mintKeypair, serverWallet);
+    await tokenAttemptCleanup.setMintAddress(
+      attemptId,
+      userPublicKey.toBase58(),
+      mintKeypair.publicKey.toBase58(),
+    );
 
     const totalEstimatedServerRentLamports = Object.values(estimatedServerRentLamports).reduce((total, amount) => total + amount, 0);
     const totalEstimatedServerProtocolFeeLamports = Object.values(estimatedServerProtocolFeeLamports).reduce((total, amount) => total + amount, 0);
@@ -170,6 +186,21 @@ export const createToken = async (req: Request, res: Response): Promise<Response
     });
 
   } catch (error: any) {
+    if (attemptStarted) {
+      try {
+        await tokenAttemptCleanup.cancel(attemptId, req.body.userWallet);
+        // Also cover a CID returned by Pinata immediately before Redis failed
+        // to persist it in the attempt record.
+        await tokenAttemptCleanup.cleanupKnownCids(uploadedCids);
+      } catch (cleanupError) {
+        logger.warn({ attemptId, errorName: cleanupError instanceof Error ? cleanupError.name : 'UnknownError' }, 'Failed to clean token creation uploads after preparation error');
+        try {
+          await tokenAttemptCleanup.cleanupKnownCids(uploadedCids);
+        } catch {
+          // A tracked pending attempt remains in Redis for the cleanup worker.
+        }
+      }
+    }
     if (error instanceof PublicError) {
       return res.status(error.status).json({ success: false, error: error.message });
     }
@@ -273,12 +304,14 @@ export const submitTransaction = async (req: Request, res: Response): Promise<Re
     const existingToken = await prisma.token.findUnique({ where: { mintAddress: mintPublicKey.toBase58() } });
     if (existingToken) {
       if (existingToken.txHash === signature && existingToken.creatorWallet === creatorPublicKey.toBase58()) {
+        await tokenAttemptCleanup.complete(attemptId, creatorPublicKey.toBase58()).catch(() => undefined);
         logger.info({ attemptId, userWallet: creatorPublicKey.toBase58(), mintAddress: mintPublicKey.toBase58(), txHash: signature, outcome: 'already_registered' }, 'Token creation attempt registered idempotently');
         return res.status(200).json(successPayload);
       }
       return res.status(409).json({ success: false, error: 'Token is already registered' });
     }
 
+    await tokenAttemptCleanup.markSubmitted(attemptId, creatorPublicKey.toBase58(), signature);
     await confirmSignedTransaction(connection, tx.serialize(), signature);
     try {
       const serverLamportSpend = await getServerLamportSpend(tx, signature);
@@ -327,6 +360,9 @@ export const submitTransaction = async (req: Request, res: Response): Promise<Re
       txHash: signature,
       status: 'completed',
       poolAddress: null,
+    });
+    await tokenAttemptCleanup.complete(attemptId, creatorPublicKey.toBase58()).catch((cleanupError) => {
+      logger.warn({ attemptId, errorName: cleanupError instanceof Error ? cleanupError.name : 'UnknownError' }, 'Token registered but attempt cleanup state could not be removed');
     });
 
     logger.info({ attemptId, userWallet: creatorPublicKey.toBase58(), mintAddress: mintPublicKey.toBase58(), txHash: signature, outcome: 'registered' }, 'Token creation completed');

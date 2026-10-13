@@ -11,6 +11,7 @@ import { createWalletHistoryRouter } from './routes/walletHistoryRoutes';
 import { prisma } from './utils/prisma';
 import { createTokenAttemptRouter } from './routes/tokenAttemptRoutes';
 import { reportTokenAttemptOutcome } from './controllers/tokenAttemptController';
+import { tokenAttemptCleanup } from './services/tokenAttemptCleanupRuntime';
 
 const app = express();
 const allowedOrigins = new Set(config.corsOrigins);
@@ -73,6 +74,7 @@ async function start() {
   } catch (error) {
     logger.error({ err: error }, 'Rate limit store not available at startup, requests will return 503 until it connects');
   }
+  tokenAttemptCleanup.start((error) => logger.error({ err: error }, 'Token attempt IPFS cleanup sweep failed'));
 
   const server = app.listen(config.port, () => {
     logger.info(`Server running on port ${config.port}`);
@@ -83,6 +85,7 @@ async function start() {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, 'Shutting down server');
+    tokenAttemptCleanup.stop();
     server.close(async (error) => {
       if (error) logger.error({ err: error }, 'HTTP server shutdown failed');
       const results = await Promise.allSettled([prisma.$disconnect(), disconnectRateLimitStore()]);
