@@ -1,6 +1,6 @@
 # Wire Launchpad — traspaso de Codex a Claude
 
-Actualizado: 2026-10-14 (America/Bogota)
+Actualizado: 2026-10-13 (America/Bogota)
 
 Este archivo resume el estado confirmado en Codex para que Claude pueda continuar sin repetir trabajo ni confundir las pruebas manuales. El usuario prefiere conversar en español, recibir instrucciones concretas y probar paso a paso. Si hay que pedirle una acción de wallet, decir exactamente qué botón tocar y esperar su resultado.
 
@@ -18,10 +18,10 @@ Este archivo resume el estado confirmado en Codex para que Claude pueda continua
 
 - Ruta del proyecto: `C:\Users\Usuario\Desktop\claude launcher solana\launchpad-solana-fixed-byclaude\launchpad`
 - Rama activa: `codex-fixes`
-- Rama actual: `codex-fixes`, HEAD `5e5845e`; alineada con `origin/codex-fixes` al iniciar la tarea de retiros.
-- Los cambios anteriores de registro idempotente, página de detalle, historial, validación `RPC_WEBSOCKET` e IPFS metadata ya están subidos a GitHub (incluidos `56fe27a`, `4cc5c6f`, `82f5e32` y `5e5845e`).
-- Cambios locales actuales antes del commit: telemetría de intentos y costos de creación, blockhash más fresco, cálculos exactos de retiro y pruebas, historial privado de tokens/retiros usando la sesión, autenticación por firma, panel de wallet persistente y sus pruebas, además de este handoff. No se leyó ni incluyó `backend/.env`.
-- La página de detalle ya estaba comprometida; el historial sí tiene cambios locales nuevos para combinar tokens y retiros y requerir la wallet identificada.
+- Rama activa: `codex-fixes`. HEAD de código antes de crear este commit de handoff: `81ba389`. Al incluir este handoff, habrá cuatro commits locales por delante de `origin/codex-fixes`; no se ha hecho push.
+- Commits locales de este avance: `353d859` (CID compartidos en limpieza Pinata) y `81ba389` (sesión obligatoria para historial de pools/tokens). Previamente existe `092810d` con la limpieza inicial de intentos.
+- Los cambios de registro idempotente, página de detalle, historial previo, validación `RPC_WEBSOCKET` e IPFS metadata ya están en la historia de la rama. No se leyó ni incluyó `backend/.env`.
+- El árbol de trabajo del proyecto estaba limpio antes de editar este handoff. Hay un archivo no rastreado en la carpeta padre de `launchpad`; cambió de 0 a 3880 bytes y no se borró ni se incluyó porque dejó de cumplir la condición de seguridad dada por el usuario.
 
 Antes de editar, ejecutar `git status --short --branch` y revisar el diff existente. No asumir que el árbol está limpio.
 
@@ -198,19 +198,27 @@ El 2026-10-13 se cerraron varios hallazgos de la revisión estática. El commit 
 
 Pendiente para un despliegue concreto: elegir hosting/dominios, configurar el número correcto de proxies confiables (`TRUST_PROXY_HOPS`), validar cookies/CORS con esos dominios y configurar probes del host a `/health/ready`. Mantener Devnet; no hacer migración a Mainnet como parte de esta preparación.
 
-## Limpieza de pins huérfanos de Pinata (commit local `2251860`, sin push)
+## Limpieza de pins huérfanos de Pinata (commits locales, sin push)
 
-El 2026-10-13 se implementó el seguimiento y limpieza de archivos subidos al preparar un token:
+La lógica inicial de seguimiento se añadió en `092810d`. El 2026-10-13 se corrigió el caso de dos intentos concurrentes que comparten un CID:
 
-- Cada `attemptId` guarda en Redis la wallet, mint cuando ya existe, CIDs subidos y firma cuando el cliente envía la transacción.
-- Si falla la preparación antes de devolver una transacción, el servidor intenta despinnear los CIDs conocidos.
-- Cuando Phantom rechaza la firma, `/api/token-attempt/outcome` valida wallet/mint contra el intento y limpia los CIDs. El trabajo lo ejecuta el backend, no depende de mantener abierta la página.
-- Los intentos abandonados se revisan después de 24 horas; un worker ligero corre cada minuto. Si Solana confirma la firma, conserva los archivos. Si sigue procesándose, aplaza la limpieza.
-- Antes de despinnear, el backend busca referencias de imagen en la DB y referencias de metadata en tokens ya registrados on-chain. Si DB/RPC no permiten comprobarlo, no elimina ese CID en ese ciclo y vuelve a intentarlo.
-- Pinata documenta `DELETE /pinning/unpin/{CID}` para quitar el pin de la cuenta. Esto no borra el contenido de IPFS de otros nodos.
-- Pruebas unitarias añadidas para cancelación, propiedad wallet/mint, preservación de transacciones confirmadas y barrido de intentos abandonados.
-- Verificación actual: backend y frontend `npx tsc --noEmit` pasaron; backend `npm test` pasó 68/68; `git diff --check` pasó. No se ejecutaron pruebas de integración ni se despinneó ningún CID real durante la implementación.
-- Los cambios quedaron en el commit local `2251860` (`Clean up abandoned Pinata token uploads`); la rama `codex-fixes` está un commit por delante de `origin/codex-fixes`. No hacer push hasta que el usuario lo pida. No se modificaron ni limpiaron manualmente archivos existentes en Pinata.
+- Cada CID usa un set Redis `wire:token-attempt:cid:<cid>` con los `attemptId` que lo referencian. Los scripts Lua actualizan el set atómicamente con `SADD`/`EXPIRE` y liberan usos con `SREM`/`SCARD`/`DEL`.
+- El set expira en 48 horas, con TTL renovado al agregar un uso. Esto limita la fuga si desaparece un registro de intento; el test cubre un miembro huérfano tras vencer el TTL.
+- Cancelar programa el barrido para dentro de dos minutos; no hace un unpin inmediato. Al vencer la gracia, el worker libera el uso y solo despinnea si no queda otro intento y ninguna fila/token on-chain referencia el CID.
+- `cleanupKnownCids` recibe el `attemptId` cuando existe. Sin ID consulta el número de usos y no hace unpin mientras haya usuarios. Los fallos de Redis, RPC/DB o Pinata mantienen el trabajo diferido para reintento.
+- En el controlador, Pinata devuelve el CID antes de que pueda registrarse en Redis; el registro ocurre inmediatamente al recibirlo. Sigue existiendo una ventana estrecha entre la respuesta de Pinata y `addCid` en la que un fallo abrupto podría dejar el CID sin rastrear.
+- **Riesgo conocido para revisar antes de Mainnet:** el conteo atómico Redis y el unpin remoto de Pinata no forman una transacción atómica. La gracia de dos minutos mitiga la carrera entre un reintento inmediato y un barrido, pero no la elimina si otro intento obtiene el mismo CID justo después del conteo y antes del unpin. Se acepta para Devnet; revisar mitigaciones antes de Mainnet.
+- Pruebas de cleanup cubren CID compartido entre intentos, cancelación con gracia, reintento durante la gracia, expiración de miembro huérfano, CID referenciado por un token, y fallos de Redis/RPC que no deben despinnear.
+- La tarea 1 se guardó en `353d859`; la tarea 2, que protege las rutas de historial y conecta la UI, en `81ba389`. No se hizo push ni se despinneó ningún CID real.
+
+## Rutas privadas de historial de tokens y pools
+
+Desde `81ba389`, `GET /api/my-pools` y `GET /api/my-tokens` requieren la sesión de wallet firmada. El backend deriva la wallet de la cookie de sesión, ignora la wallet de query y devuelve `401` con “Identifica tu wallet…” si no hay sesión. Las respuestas llevan `Cache-Control: no-store`.
+
+- Los únicos consumidores frontend encontrados para `/api/my-pools` son `ManageLiquidity` y `PoolCreate`; ahora envían credenciales de sesión y ya no envían `userWallet` en la URL.
+- Sin wallet identificada, ambas vistas indican que hay que identificarla; Manage Liquidity no presenta ese estado como una lista vacía. PoolCreate impide continuar a crear la pool hasta que la sesión corresponda a la wallet conectada.
+- Los endpoints `create-pool`, `submit-pool-transaction` y el retiro firmado no se modificaron en esta tarea. La lectura de historial con sesión se probó por ruta; no se hizo una creación de pool ni retiro on-chain.
+- Se añadió cobertura de ruta para 401 sin sesión incluso cuando la query incluye una wallet, acceso con sesión ignorando una wallet distinta en query, y handlers que consultan por wallet de sesión. La integración Postgres también prepara identidad de sesión; solo corre si se configura `TEST_DATABASE_URL`.
 
 ## Estado de la lista original de Claude
 
