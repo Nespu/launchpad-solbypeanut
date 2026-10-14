@@ -5,8 +5,8 @@ import { tokenAttemptCleanup } from '../services/tokenAttemptCleanupRuntime';
 export const reportTokenAttemptOutcome: RequestHandler = async (req, res) => {
   const { attemptId, userWallet, mintAddress, outcome } = req.body;
   try {
-    const cleaned = await tokenAttemptCleanup.cancel(attemptId, userWallet, mintAddress);
-    logger.info({ attemptId, userWallet, mintAddress, outcome, cleaned }, 'Token creation wallet signature rejected');
+    const scheduled = await tokenAttemptCleanup.cancel(attemptId, userWallet, mintAddress);
+    logger.info({ attemptId, userWallet, mintAddress, outcome, scheduled }, 'Token creation wallet signature rejected');
   } catch (error) {
     logger.warn({
       attemptId,

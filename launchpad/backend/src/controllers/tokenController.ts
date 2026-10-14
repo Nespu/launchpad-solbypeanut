@@ -188,14 +188,15 @@ export const createToken = async (req: Request, res: Response): Promise<Response
   } catch (error: any) {
     if (attemptStarted) {
       try {
-        await tokenAttemptCleanup.cancel(attemptId, req.body.userWallet);
-        // Also cover a CID returned by Pinata immediately before Redis failed
-        // to persist it in the attempt record.
-        await tokenAttemptCleanup.cleanupKnownCids(uploadedCids);
+        // Covers a CID returned by Pinata immediately before Redis failed to
+        // persist it in the attempt record. A preparation failure can clean
+        // immediately; a user cancellation uses the two-minute grace in cancel().
+        await tokenAttemptCleanup.cleanupKnownCids(uploadedCids, attemptId);
+        await tokenAttemptCleanup.complete(attemptId, new PublicKey(req.body.userWallet).toBase58());
       } catch (cleanupError) {
         logger.warn({ attemptId, errorName: cleanupError instanceof Error ? cleanupError.name : 'UnknownError' }, 'Failed to clean token creation uploads after preparation error');
         try {
-          await tokenAttemptCleanup.cleanupKnownCids(uploadedCids);
+          await tokenAttemptCleanup.cancel(attemptId, new PublicKey(req.body.userWallet).toBase58());
         } catch {
           // A tracked pending attempt remains in Redis for the cleanup worker.
         }
