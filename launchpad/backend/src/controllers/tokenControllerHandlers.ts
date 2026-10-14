@@ -8,24 +8,21 @@ type WithdrawalStore = Pick<PrismaClient, 'withdrawal'>;
 
 export const MY_TOKENS_LIMIT = 100;
 
+function getSessionWallet(res: Response): string | null {
+  const wallet = res.locals.walletIdentity;
+  if (typeof wallet !== 'string' || !wallet) return null;
+  try {
+    return new PublicKey(wallet).toBase58();
+  } catch {
+    return null;
+  }
+}
+
 export function createGetMyPoolsHandler(prisma: TokenStore) {
-  return async (req: Request, res: Response): Promise<Response> => {
+  return async (_req: Request, res: Response): Promise<Response> => {
     try {
-      const { userWallet } = req.query;
-
-      if (typeof userWallet !== 'string' || !userWallet) {
-        return res.status(400).json({
-          success: false,
-          error: 'Missing required query param: userWallet',
-        });
-      }
-
-      let creatorWallet: string;
-      try {
-        creatorWallet = new PublicKey(userWallet).toBase58();
-      } catch {
-        return res.status(400).json({ success: false, error: 'Invalid userWallet' });
-      }
+      const creatorWallet = getSessionWallet(res);
+      if (!creatorWallet) return res.status(401).json({ success: false, error: 'Identifica tu wallet para consultar tus pools.' });
 
       const pools = await prisma.token.findMany({
         where: {
@@ -55,18 +52,9 @@ export function createGetMyPoolsHandler(prisma: TokenStore) {
 }
 
 export function createGetMyTokensHandler(prisma: TokenStore) {
-  return async (req: Request, res: Response): Promise<Response> => {
-    const { userWallet } = req.query;
-    if (typeof userWallet !== 'string' || !userWallet) {
-      return res.status(400).json({ success: false, error: 'Missing required query param: userWallet' });
-    }
-
-    let creatorWallet: string;
-    try {
-      creatorWallet = new PublicKey(userWallet).toBase58();
-    } catch {
-      return res.status(400).json({ success: false, error: 'Invalid userWallet' });
-    }
+  return async (_req: Request, res: Response): Promise<Response> => {
+    const creatorWallet = getSessionWallet(res);
+    if (!creatorWallet) return res.status(401).json({ success: false, error: 'Identifica tu wallet para consultar tus tokens.' });
 
     try {
       const tokens = await prisma.token.findMany({

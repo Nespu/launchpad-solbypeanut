@@ -15,6 +15,7 @@ const poolAddress = 'SysvarRent111111111111111111111111111111111';
 function responseRecorder() {
   const result: { statusCode?: number; body?: unknown } = {};
   const res = {
+    locals: { walletIdentity: creatorWallet },
     status(code: number) {
       result.statusCode = code;
       return this;
@@ -80,7 +81,7 @@ integrationTest('PostgreSQL persists pool filtering and confirmed withdrawal sta
   assert.equal(cleanedToken.symbol, 'TST');
 
   const poolsResponse = responseRecorder();
-  await createGetMyPoolsHandler(prisma)(request({ query: { userWallet: creatorWallet } }), poolsResponse.res);
+  await createGetMyPoolsHandler(prisma)(request({ query: {} }), poolsResponse.res);
   assert.equal(poolsResponse.result.statusCode, 200);
   assert.deepEqual(
     (poolsResponse.result.body as { pools: Array<{ mintAddress: string }> }).pools.map((pool) => pool.mintAddress),

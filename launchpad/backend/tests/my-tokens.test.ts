@@ -22,13 +22,15 @@ type FindManyArgs = {
   take?: number;
 };
 
-function createRequest(query: Record<string, unknown>): Request {
+function createRequest(query: Record<string, unknown> = {}): Request {
   return { query } as unknown as Request;
 }
 
-function createResponse() {
+function createResponse(walletIdentity?: string) {
   const state: { status?: number; body?: any } = {};
+  const locals = walletIdentity ? { walletIdentity } : {};
   const res = {
+    locals,
     status(code: number) {
       state.status = code;
       return res;
@@ -58,31 +60,32 @@ function createStore(
   return store as never;
 }
 
-test('my tokens: falta userWallet responde 400 sin consultar la base', async () => {
+test('my tokens: missing session returns 401 without querying the database', async () => {
   const calls = { count: 0 };
   const handler = createGetMyTokensHandler(createStore([], calls));
   const { res, state } = createResponse();
 
   await handler(createRequest({}), res);
 
-  assert.equal(state.status, 400);
+  assert.equal(state.status, 401);
   assert.equal(state.body.success, false);
   assert.equal(calls.count, 0);
 });
 
-test('my tokens: wallet invalida responde 400 sin consultar la base', async () => {
+test('my tokens: query wallet cannot override the session wallet', async () => {
   const calls = { count: 0 };
   const handler = createGetMyTokensHandler(createStore([], calls));
-  const { res, state } = createResponse();
+  const { res, state } = createResponse(VALID_WALLET);
 
   await handler(createRequest({ userWallet: 'no-es-una-wallet' }), res);
 
-  assert.equal(state.status, 400);
-  assert.equal(state.body.success, false);
-  assert.equal(calls.count, 0);
+  assert.equal(state.status, 200);
+  assert.equal(state.body.success, true);
+  assert.equal(calls.count, 1);
+  assert.equal(calls.args?.where?.creatorWallet, VALID_WALLET);
 });
 
-test('my tokens: wallet valida consulta por creador, ordena por fecha y devuelve solo campos permitidos', async () => {
+test('session wallet query orders by date and returns only allowed fields', async () => {
   const rows = [
     {
       mintAddress: 'So11111111111111111111111111111111111111112',
@@ -96,9 +99,9 @@ test('my tokens: wallet valida consulta por creador, ordena por fecha y devuelve
   ];
   const calls: { count: number; args?: FindManyArgs } = { count: 0 };
   const handler = createGetMyTokensHandler(createStore(rows, calls));
-  const { res, state } = createResponse();
+  const { res, state } = createResponse(VALID_WALLET);
 
-  await handler(createRequest({ userWallet: VALID_WALLET }), res);
+  await handler(createRequest({ userWallet: 'Vote111111111111111111111111111111111111111' }), res);
 
   assert.equal(state.status, 200);
   assert.equal(state.body.success, true);
@@ -112,9 +115,9 @@ test('my tokens: wallet valida consulta por creador, ordena por fecha y devuelve
 test('my tokens: la consulta pide como maximo MY_TOKENS_LIMIT tokens', async () => {
   const calls: { count: number; args?: FindManyArgs } = { count: 0 };
   const handler = createGetMyTokensHandler(createStore([], calls));
-  const { res } = createResponse();
+  const { res } = createResponse(VALID_WALLET);
 
-  await handler(createRequest({ userWallet: VALID_WALLET }), res);
+  await handler(createRequest({}), res);
 
   assert.equal(MY_TOKENS_LIMIT, 100);
   assert.equal(calls.args?.take, MY_TOKENS_LIMIT);
@@ -122,9 +125,9 @@ test('my tokens: la consulta pide como maximo MY_TOKENS_LIMIT tokens', async () 
 
 test('my tokens: wallet sin tokens responde 200 con lista vacia', async () => {
   const handler = createGetMyTokensHandler(createStore([]));
-  const { res, state } = createResponse();
+  const { res, state } = createResponse(VALID_WALLET);
 
-  await handler(createRequest({ userWallet: VALID_WALLET }), res);
+  await handler(createRequest({ userWallet: 'Vote111111111111111111111111111111111111111' }), res);
 
   assert.equal(state.status, 200);
   assert.deepEqual(state.body.tokens, []);
@@ -132,9 +135,9 @@ test('my tokens: wallet sin tokens responde 200 con lista vacia', async () => {
 
 test('my tokens: un fallo de la base responde 500 sin filtrar detalles', async () => {
   const handler = createGetMyTokensHandler(createStore(new Error('detalle-interno-secreto')));
-  const { res, state } = createResponse();
+  const { res, state } = createResponse(VALID_WALLET);
 
-  await handler(createRequest({ userWallet: VALID_WALLET }), res);
+  await handler(createRequest({ userWallet: 'Vote111111111111111111111111111111111111111' }), res);
 
   assert.equal(state.status, 500);
   assert.equal(state.body.success, false);

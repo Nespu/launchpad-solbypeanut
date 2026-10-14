@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useWallet } from '@solana/wallet-adapter-react';
 import WithdrawLiquidity from './WithdrawLiquidity';
+import { useWalletIdentity } from './WalletIdentityProvider';
 
 type Pool = {
   mintAddress: string;
@@ -16,6 +17,9 @@ type Pool = {
 
 export default function ManageLiquidity() {
   const { publicKey } = useWallet();
+  const { identifiedWallet } = useWalletIdentity();
+  const walletAddress = publicKey?.toBase58() ?? null;
+  const isIdentified = Boolean(walletAddress && identifiedWallet === walletAddress);
   const [pools, setPools] = useState<Pool[]>([]);
   const [selectedPool, setSelectedPool] = useState<Pool | null>(null);
   const [loading, setLoading] = useState(false);
@@ -24,10 +28,11 @@ export default function ManageLiquidity() {
   useEffect(() => {
     let active = true;
 
-    if (!publicKey) {
+    if (!walletAddress || !isIdentified) {
       setPools([]);
       setLoading(false);
       setError('');
+      setSelectedPool(null);
       return () => {
         active = false;
       };
@@ -35,11 +40,10 @@ export default function ManageLiquidity() {
 
     setLoading(true);
     setError('');
-    fetch(
-      (process.env.NEXT_PUBLIC_API_URL || '') +
-        '/api/my-pools?userWallet=' +
-        encodeURIComponent(publicKey.toBase58())
-    )
+    fetch((process.env.NEXT_PUBLIC_API_URL || '') + '/api/my-pools', {
+      credentials: 'include',
+      cache: 'no-store',
+    })
       .then(async (response) => {
         const data = await response.json();
         if (!response.ok || !data.success) {
@@ -60,9 +64,9 @@ export default function ManageLiquidity() {
     return () => {
       active = false;
     };
-  }, [publicKey]);
+  }, [walletAddress, isIdentified]);
 
-  if (selectedPool) {
+  if (selectedPool && publicKey && isIdentified) {
     return (
       <WithdrawLiquidity
         poolAddress={selectedPool.poolAddress}
@@ -86,6 +90,10 @@ export default function ManageLiquidity() {
       {!publicKey ? (
         <div className="glass-card p-8 text-center rounded-2xl">
           <p className="text-sm text-[var(--muted)]">Conecta tu wallet desde la barra superior para ver tus pools.</p>
+        </div>
+      ) : !isIdentified ? (
+        <div className="glass-card p-8 text-center rounded-2xl">
+          <p className="text-sm text-[var(--muted)]">Identifica tu wallet desde el panel Wallet para consultar y gestionar tus pools.</p>
         </div>
       ) : loading ? (
         <div className="glass-card p-8 text-center rounded-2xl text-sm text-[var(--muted)]">

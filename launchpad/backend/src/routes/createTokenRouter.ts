@@ -10,8 +10,6 @@ import {
   withdrawLiquiditySchema,
   updateWithdrawalResultSchema,
   lpBalanceQuerySchema,
-  myPoolsQuerySchema,
-  myTokensQuerySchema,
 } from '../utils/schemas';
 
 export type TokenRouteHandlers = {
@@ -57,6 +55,23 @@ export function createTokenRouter(
     }
   };
 
+  const requireWalletSession: RequestHandler = async (req, res, next) => {
+    res.setHeader('Cache-Control', 'no-store');
+    if (!resolveWalletSession) {
+      return res.status(401).json({ success: false, error: 'Identifica tu wallet para consultar tus tokens y pools.' });
+    }
+    try {
+      const sessionWallet = await resolveWalletSession(req);
+      if (!sessionWallet) {
+        return res.status(401).json({ success: false, error: 'Identifica tu wallet para consultar tus tokens y pools.' });
+      }
+      res.locals.walletIdentity = new PublicKey(sessionWallet).toBase58();
+      return next();
+    } catch {
+      return res.status(503).json({ success: false, error: 'No se pudo verificar la sesión de wallet. Intenta de nuevo.' });
+    }
+  };
+
   router.get('/fee-config', handlers.getFeeConfig);
   router.post(
     '/create-token',
@@ -72,8 +87,8 @@ export function createTokenRouter(
   router.post('/withdraw-liquidity', rateLimitFactory('withdraw-liquidity', 10, 15 * 60 * 1000), validateBody(withdrawLiquiditySchema), handlers.withdrawLiquidity);
   router.post('/withdrawal-result', rateLimitFactory('withdrawal-result', 20, 15 * 60 * 1000), validateBody(updateWithdrawalResultSchema), handlers.updateWithdrawalResult);
   router.get('/lp-balance', validateQuery(lpBalanceQuerySchema), handlers.getLpBalance);
-  router.get('/my-pools', validateQuery(myPoolsQuerySchema), handlers.getMyPools);
-  router.get('/my-tokens', validateQuery(myTokensQuerySchema), handlers.getMyTokens);
+  router.get('/my-pools', requireWalletSession, handlers.getMyPools);
+  router.get('/my-tokens', requireWalletSession, handlers.getMyTokens);
   router.get('/token/:mintAddress', handlers.getTokenDetails);
 
   return router;

@@ -15,9 +15,11 @@ const wallet = '11111111111111111111111111111111';
 const otherWallet = 'Vote111111111111111111111111111111111111111';
 const poolAddress = 'SysvarRent111111111111111111111111111111111';
 
-function responseRecorder() {
+function responseRecorder(locals: Record<string, unknown> = {}) {
   const result: { statusCode?: number; body?: unknown } = {};
+  const responseLocals = locals;
   const res = {
+    locals: responseLocals,
     status(code: number) {
       result.statusCode = code;
       return this;
@@ -141,9 +143,9 @@ test('getMyPools canonicalizes wallet and asks Prisma to exclude missing and pen
     },
   });
   const handler = createGetMyPoolsHandler(prisma);
-  const { result, res } = responseRecorder();
+  const { result, res } = responseRecorder({ walletIdentity: wallet });
 
-  await handler(request({ query: { userWallet: wallet } }), res);
+  await handler(request({ query: { userWallet: otherWallet } }), res);
 
   assert.equal(result.statusCode, 200);
   assert.deepEqual(result.body, { success: true, pools });
@@ -154,16 +156,16 @@ test('getMyPools canonicalizes wallet and asks Prisma to exclude missing and pen
   });
 });
 
-test('getMyPools rejects invalid wallet before querying Prisma', async () => {
+test('getMyPools rejects missing session identity before querying Prisma', async () => {
   let queried = false;
   const handler = createGetMyPoolsHandler(fakePrisma({
     token: { findMany: async () => { queried = true; return []; } },
   }));
   const { result, res } = responseRecorder();
 
-  await handler(request({ query: { userWallet: 'not-a-wallet' } }), res);
+  await handler(request({ query: { userWallet: wallet } }), res);
 
-  assert.equal(result.statusCode, 400);
+  assert.equal(result.statusCode, 401);
   assert.equal(queried, false);
 });
 

@@ -25,10 +25,11 @@ function createMemoryCounter(now: () => number = Date.now): RateLimitCounter {
   };
 }
 
-function createHandlers(calls: { count: number; lastBody?: unknown }): TokenRouteHandlers {
+function createHandlers(calls: { count: number; lastBody?: unknown; lastWallet?: unknown }): TokenRouteHandlers {
   const handler: RequestHandler = (req, res) => {
     calls.count += 1;
     calls.lastBody = req.body;
+    calls.lastWallet = res.locals.walletIdentity;
     res.status(201).json({ success: true });
   };
 
@@ -48,7 +49,7 @@ function createHandlers(calls: { count: number; lastBody?: unknown }): TokenRout
 }
 
 async function startTestApi(rateLimitFactory: RateLimitFactory, resolveWalletSession?: WalletSessionResolver) {
-  const calls = { count: 0, lastBody: undefined as unknown };
+  const calls = { count: 0, lastBody: undefined as unknown, lastWallet: undefined as unknown };
   const app = express();
   app.use(express.json());
   app.use('/api', createTokenRouter(createHandlers(calls), rateLimitFactory, resolveWalletSession));
@@ -229,19 +230,29 @@ test('rate limiter fails closed with 503 when its counter store fails', async ()
   }
 });
 
-test('my pools route validates the wallet query before calling its handler', async () => {
-  const api = await startTestApi(rateLimitFactory(createMemoryCounter()));
-
+test('my pools and my tokens require a session wallet instead of a query wallet', async () => {
+  const unauthenticated = await startTestApi(rateLimitFactory(createMemoryCounter()));
   try {
-    const invalidResponse = await fetch(`${api.baseUrl}/api/my-pools?userWallet=invalid`);
-    assert.equal(invalidResponse.status, 400);
-    assert.equal(api.calls.count, 0);
-
-    const validResponse = await fetch(`${api.baseUrl}/api/my-pools?userWallet=${address}`);
-    assert.equal(validResponse.status, 201);
-    assert.equal(api.calls.count, 1);
+    for (const path of ['/api/my-pools', `/api/my-pools?userWallet=${address}`, '/api/my-tokens']) {
+      const response = await fetch(`${unauthenticated.baseUrl}${path}`);
+      assert.equal(response.status, 401);
+      assert.equal((await response.json()).error, 'Identifica tu wallet para consultar tus tokens y pools.');
+    }
+    assert.equal(unauthenticated.calls.count, 0);
   } finally {
-    await api.close();
+    await unauthenticated.close();
+  }
+
+  const authenticated = await startTestApi(rateLimitFactory(createMemoryCounter()), async () => address);
+  try {
+    for (const path of ['/api/my-pools', `/api/my-pools?userWallet=${'Vote111111111111111111111111111111111111111'}`, '/api/my-tokens']) {
+      const response = await fetch(`${authenticated.baseUrl}${path}`);
+      assert.equal(response.status, 201);
+    }
+    assert.equal(authenticated.calls.count, 3);
+    assert.equal(authenticated.calls.lastWallet, address, 'the handler receives the wallet from the session');
+  } finally {
+    await authenticated.close();
   }
 });
 

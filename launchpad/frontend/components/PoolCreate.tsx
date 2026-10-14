@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { useWallet } from '@solana/wallet-adapter-react';
 import { Transaction, Connection } from '@solana/web3.js';
 import WithdrawLiquidity from './WithdrawLiquidity';
+import { useWalletIdentity } from './WalletIdentityProvider';
 
 interface PoolCreateProps {
   mintAddress: string;
@@ -21,6 +22,9 @@ export default function PoolCreate({
   onBack,
 }: PoolCreateProps) {
   const { publicKey, signTransaction } = useWallet();
+  const { identifiedWallet } = useWalletIdentity();
+  const walletAddress = publicKey?.toBase58() ?? null;
+  const isIdentified = Boolean(walletAddress && identifiedWallet === walletAddress);
 
   const [tokenAmount, setTokenAmount] = useState(defaultTokenAmount);
   const [solAmount, setSolAmount] = useState(defaultSolAmount);
@@ -38,7 +42,9 @@ export default function PoolCreate({
     let active = true;
 
     const checkExistingPool = async () => {
-      if (!publicKey) {
+      if (!walletAddress || !isIdentified) {
+        setExistingPool(null);
+        setPoolCheckFailed(false);
         setCheckingPool(false);
         return;
       }
@@ -46,11 +52,10 @@ export default function PoolCreate({
       setCheckingPool(true);
       setPoolCheckFailed(false);
       try {
-        const response = await fetch(
-          (process.env.NEXT_PUBLIC_API_URL || '') +
-            '/api/my-pools?userWallet=' +
-            encodeURIComponent(publicKey.toBase58())
-        );
+        const response = await fetch((process.env.NEXT_PUBLIC_API_URL || '') + '/api/my-pools', {
+          credentials: 'include',
+          cache: 'no-store',
+        });
         const data = await response.json();
         if (!response.ok || !data.success) {
           throw new Error(data.error || 'No se pudo comprobar si el token ya tiene una pool');
@@ -71,8 +76,12 @@ export default function PoolCreate({
     return () => {
       active = false;
     };
-  }, [mintAddress, publicKey, poolCheckAttempt]);
+  }, [mintAddress, walletAddress, isIdentified, poolCheckAttempt]);
   const handleCreatePool = async () => {
+    if (!isIdentified) {
+      setError('Identifica tu wallet antes de crear la pool.');
+      return;
+    }
     if (!publicKey || !signTransaction) {
       setError('Please connect your wallet first');
       return;
@@ -138,12 +147,25 @@ export default function PoolCreate({
     );
   };
 
-  if ((poolResult || existingPool) && goToWithdraw) {
+  if ((poolResult || existingPool) && goToWithdraw && publicKey && isIdentified) {
     return (
       <WithdrawLiquidity
         poolAddress={poolResult?.poolId || existingPool!}
         onBack={() => setGoToWithdraw(false)}
       />
+    );
+  }
+
+  if (!publicKey || !isIdentified) {
+    return (
+      <div className="max-w-xl mx-auto">
+        <button onClick={onBack} className="text-sm text-[var(--muted)] mb-5 flex items-center gap-1">
+          {'<-'} Volver
+        </button>
+        <div className="glass-card rounded-2xl p-6 text-sm text-[var(--muted)]">
+          {!publicKey ? 'Conecta tu wallet para crear una pool.' : 'Identifica tu wallet desde el panel Wallet para comprobar y crear la pool.'}
+        </div>
+      </div>
     );
   }
 
