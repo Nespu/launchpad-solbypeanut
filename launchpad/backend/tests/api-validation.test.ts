@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import bs58 from 'bs58';
 import type { NextFunction, Request, Response } from 'express';
 import { validateBody, validateQuery } from '../src/middleware/validateRequest';
 import {
   createPoolSchema,
   createTokenSchema,
+  lpBalanceQuerySchema,
   myPoolsQuerySchema,
   updateWithdrawalResultSchema,
   withdrawLiquiditySchema,
@@ -116,16 +118,24 @@ test('pool and withdrawal schemas only accept positive integer token amounts', (
   assert.equal(createPoolSchema.safeParse(poolInput).success, true);
   assert.equal(createPoolSchema.safeParse({ ...poolInput, tokenAmount: '0' }).success, false);
   assert.equal(createPoolSchema.safeParse({ ...poolInput, tokenAmount: '1.5' }).success, false);
+  assert.equal(createPoolSchema.safeParse({ userWallet: address, mintAddress: address, tokenAmount: '1000', quoteAsset: 'USDC', quoteAmount: '12.345678' }).success, true);
+  assert.equal(createPoolSchema.safeParse({ userWallet: address, mintAddress: address, tokenAmount: '1000', quoteAsset: 'USDC' }).success, false);
+  assert.equal(createPoolSchema.safeParse({ userWallet: address, mintAddress: address, tokenAmount: '1000', quoteAsset: 'USDC', quoteAmount: '12.3456789' }).success, false);
   assert.equal(withdrawLiquiditySchema.safeParse(withdrawalInput).success, true);
   assert.equal(withdrawLiquiditySchema.safeParse({ ...withdrawalInput, lpTokenAmount: '-1' }).success, false);
+  assert.equal(lpBalanceQuerySchema.safeParse({ userWallet: address, poolAddress: address }).success, true);
+  assert.equal(lpBalanceQuerySchema.safeParse({ userWallet: address, poolAddress: address, includePosition: 'true' }).success, true);
+  assert.equal(lpBalanceQuerySchema.safeParse({ userWallet: address, poolAddress: address, includePosition: 'yes' }).success, false);
 });
 
 test('withdrawal result requires a transaction signature or failure reason', () => {
   const baseInput = { withdrawalId: 'withdrawal-1', userWallet: address };
+  const txHash = bs58.encode(new Uint8Array(64).fill(1));
 
   assert.equal(updateWithdrawalResultSchema.safeParse(baseInput).success, false);
-  assert.equal(updateWithdrawalResultSchema.safeParse({ ...baseInput, error: 'Wallet rejected signing' }).success, true);
-  assert.equal(updateWithdrawalResultSchema.safeParse({ ...baseInput, txHash: 'a'.repeat(64) }).success, true);
+  assert.equal(updateWithdrawalResultSchema.safeParse({ ...baseInput, cancel: true }).success, true);
+  assert.equal(updateWithdrawalResultSchema.safeParse({ ...baseInput, signedTransaction: 'AQ==' }).success, true);
+  assert.equal(updateWithdrawalResultSchema.safeParse({ ...baseInput, txHash }).success, true);
 });
 
 test('body middleware rejects invalid input before calling the route handler', () => {

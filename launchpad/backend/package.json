@@ -6,23 +6,23 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p .",
-    "test": "tsx --test tests/api-validation.test.ts tests/token-routes.test.ts tests/controller-handlers.test.ts tests/token-details.test.ts tests/my-tokens.test.ts tests/token-metadata.test.ts tests/token-attempt-cleanup.test.ts tests/withdrawal-math.test.ts tests/wallet-auth.test.ts",
+    "test": "tsx --test tests/api-validation.test.ts tests/token-routes.test.ts tests/swap-routes.test.ts tests/portfolio-exit-quote.test.ts tests/controller-handlers.test.ts tests/token-details.test.ts tests/my-tokens.test.ts tests/token-metadata.test.ts tests/token-attempt-cleanup.test.ts tests/withdrawal-math.test.ts tests/liquidity-position-amounts.test.ts tests/pool-quote-asset.test.ts tests/raydium-lp-mint.test.ts tests/lp-security.test.ts tests/swap-history.test.ts tests/pump-swap-service.test.ts tests/pump-swap-history.test.ts tests/pump-creator-fee-controller.test.ts tests/pump-fee-sharing-controller.test.ts tests/token-launch-batch.test.ts tests/wallet-auth.test.ts",
     "test:integration": "tsx --test tests/postgres-integration.test.ts",
     "test:redis-integration": "tsx --test tests/redis-integration.test.ts",
     "start": "node dist/index.js",
-    "worker": "tsx watch src/queues/worker.ts",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev"
   },
   "dependencies": {
     "@metaplex-foundation/mpl-token-metadata": "^2.13.0",
     "@prisma/client": "^5.20.0",
+    "@pump-fun/pump-sdk": "^4.1.0",
+    "@pump-fun/pump-swap-sdk": "^2.1.0",
     "@raydium-io/raydium-sdk-v2": "^0.1.72-alpha",
     "@solana/spl-token": "^0.4.9",
     "@solana/web3.js": "^1.95.3",
     "bn.js": "^5.2.1",
     "bs58": "^6.0.0",
-    "bullmq": "^5.12.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
@@ -39,5 +39,11 @@
     "prisma": "^5.20.0",
     "tsx": "^4.19.1",
     "typescript": "^5.6.2"
+  },
+  "overrides": {
+    "toml": "^4.2.0",
+    "jayson": {
+      "uuid": "11.1.1"
+    }
   }
 }

@@ -6,14 +6,18 @@
    const VALID_MINT = 'So11111111111111111111111111111111111111112';
 
    const ALLOWED_FIELDS = [
+     'bondingCurveAddress',
      'createdAt',
      'creatorWallet',
      'description',
+     'holderReward',
      'imageUrl',
+     'launchPlatform',
      'liquiditySol',
      'mintAddress',
      'name',
      'poolAddress',
+     'poolQuoteMint',
      'status',
      'symbol',
      'totalSupply',
@@ -91,6 +95,10 @@
        createdAt: new Date('2026-10-10T07:06:11.000Z'),
        txHash: 'firma-de-prueba',
        poolAddress: null,
+       poolQuoteMint: 'So11111111111111111111111111111111111111112',
+       launchPlatform: 'RAYDIUM',
+       bondingCurveAddress: null,
+       holderReward: false,
        status: 'completed',
      };
      const calls: { count: number; select?: Record<string, boolean> } = { count: 0 };

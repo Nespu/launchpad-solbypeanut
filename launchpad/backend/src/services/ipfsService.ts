@@ -3,6 +3,9 @@ import { logger } from "../utils/logger";
 
 export type IpfsUpload = { cid: string; url: string };
 
+const PINATA_UPLOAD_TIMEOUT_MS = 30_000;
+const PINATA_UNPIN_TIMEOUT_MS = 15_000;
+
 /**
  * Uploads a base64-encoded image to IPFS via Pinata and returns the gateway URL.
  * imageBase64 should be a data URL (e.g. "data:image/png;base64,....") or raw base64.
@@ -18,11 +21,12 @@ export async function uploadImageToIpfs(imageBase64: string, filename = "token.p
     method: "POST",
     headers: { Authorization: `Bearer ${config.pinataJwt}` },
     body: form as any,
+    signal: AbortSignal.timeout(PINATA_UPLOAD_TIMEOUT_MS),
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    logger.error({ status: res.status, text }, "Pinata image upload failed");
+    await res.body?.cancel().catch(() => undefined);
+    logger.error({ status: res.status }, "Pinata image upload failed");
     throw new Error("Failed to upload image to IPFS");
   }
 
@@ -36,6 +40,8 @@ export async function uploadMetadataToIpfs(metadata: {
   symbol: string;
   description: string;
   image: string;
+  twitter?: string;
+  telegram?: string;
 }): Promise<IpfsUpload> {
   const res = await fetch("https://api.pinata.cloud/pinning/pinJSONToIPFS", {
     method: "POST",
@@ -44,11 +50,12 @@ export async function uploadMetadataToIpfs(metadata: {
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ pinataContent: metadata }),
+    signal: AbortSignal.timeout(PINATA_UPLOAD_TIMEOUT_MS),
   });
 
   if (!res.ok) {
-    const text = await res.text();
-    logger.error({ status: res.status, text }, "Pinata metadata upload failed");
+    await res.body?.cancel().catch(() => undefined);
+    logger.error({ status: res.status }, "Pinata metadata upload failed");
     throw new Error("Failed to upload metadata to IPFS");
   }
 
@@ -62,6 +69,7 @@ export async function unpinIpfsCid(cid: string): Promise<void> {
   const response = await fetch(`https://api.pinata.cloud/pinning/unpin/${encodeURIComponent(cid)}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${config.pinataJwt}` },
+    signal: AbortSignal.timeout(PINATA_UNPIN_TIMEOUT_MS),
   });
   if (response.ok || response.status === 404) return;
   logger.warn({ status: response.status, cid }, 'Pinata unpin request failed');

@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
+import { walletDisplayName } from '../lib/walletAdapterNames';
 
 type WalletIdentityContextValue = {
   identifiedWallet: string | null;
@@ -18,9 +19,17 @@ type WalletIdentityContextValue = {
 const WalletIdentityContext = createContext<WalletIdentityContextValue | null>(null);
 const apiUrl = process.env.NEXT_PUBLIC_API_URL || '';
 
-async function responseData(response: Response) {
-  const data = await response.json();
-  if (!response.ok || !data.success) throw new Error(data.error || 'No se pudo verificar la wallet.');
+async function responseData<T extends { success?: boolean; error?: string } = { success?: boolean; error?: string }>(response: Response): Promise<T> {
+  let data: T;
+  try {
+    data = await response.json() as T;
+  } catch {
+    throw new Error('La API de Wire respondió con un formato inesperado. Revisa NEXT_PUBLIC_API_URL y la ruta /api/auth.');
+  }
+  const payload = data as { success?: boolean; error?: string };
+  if (!response.ok || !payload?.success) {
+    throw new Error(payload?.error || `La API de Wire respondió con HTTP ${response.status}.`);
+  }
   return data;
 }
 
@@ -93,14 +102,21 @@ export function WalletIdentityProvider({ children }: { children: React.ReactNode
       return () => { active = false; };
     }
 
-    fetch(`${apiUrl}/api/auth/session`, { credentials: 'include' })
-      .then(responseData)
-      .then((data) => {
-        if (active) setIdentifiedWallet(data.authenticated && data.wallet === walletAddress ? data.wallet : null);
-      })
-      .catch(() => { if (active) setIdentifiedWallet(null); });
+    const refreshIdentity = () => {
+      fetch(`${apiUrl}/api/auth/session`, { credentials: 'include', cache: 'no-store' })
+        .then((response) => responseData<{ success: boolean; authenticated: boolean; wallet: string }>(response))
+        .then((data) => {
+          if (active) setIdentifiedWallet(data.authenticated && data.wallet === walletAddress ? data.wallet : null);
+        })
+        .catch(() => { if (active) setIdentifiedWallet(null); });
+    };
+    refreshIdentity();
+    window.addEventListener('wire:wallet-session-changed', refreshIdentity);
 
-    return () => { active = false; };
+    return () => {
+      active = false;
+      window.removeEventListener('wire:wallet-session-changed', refreshIdentity);
+    };
   }, [walletAddress]);
 
   const identifyWallet = useCallback(async () => {
@@ -117,7 +133,7 @@ export function WalletIdentityProvider({ children }: { children: React.ReactNode
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet }),
       });
-      const challenge = await responseData(challengeResponse);
+      const challenge = await responseData<{ success: boolean; message: string }>(challengeResponse);
       const signatureBytes = await signMessage(new TextEncoder().encode(challenge.message));
       const signatureBase64 = btoa(Array.from(signatureBytes, (byte) => String.fromCharCode(byte)).join(''));
       const verifyResponse = await fetch(`${apiUrl}/api/auth/verify`, {
@@ -126,7 +142,7 @@ export function WalletIdentityProvider({ children }: { children: React.ReactNode
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ wallet, message: challenge.message, signature: signatureBase64 }),
       });
-      const verified = await responseData(verifyResponse);
+      const verified = await responseData<{ success: boolean; wallet: string }>(verifyResponse);
       setIdentifiedWallet(verified.wallet);
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : 'No se pudo verificar la wallet.';
@@ -158,7 +174,7 @@ export function WalletIdentityProvider({ children }: { children: React.ReactNode
 
   const value = useMemo(() => ({
     identifiedWallet,
-    walletProviderName: wallet?.adapter.name ?? null,
+    walletProviderName: walletDisplayName(wallet?.adapter.name),
     balanceSol,
     balanceUpdatedAt,
     balanceLoading,

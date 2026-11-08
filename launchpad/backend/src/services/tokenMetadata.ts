@@ -71,6 +71,13 @@ export function isTrustedIpfsUrl(value: string, gateway: string): boolean {
   }
 }
 
+export function getTrustedIpfsCid(value: string, gateway: string): string {
+  if (!isTrustedIpfsUrl(value, gateway)) {
+    throw new PublicError('La metadata del token no apunta al almacenamiento esperado.', 400);
+  }
+  return new URL(value).pathname.slice('/ipfs/'.length);
+}
+
 async function readLimitedText(response: Response, maxBytes: number): Promise<string> {
   const declaredLength = Number(response.headers.get('content-length') || 0);
   if (declaredLength > maxBytes) throw new Error('Metadata response is too large');

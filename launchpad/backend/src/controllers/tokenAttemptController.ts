@@ -6,13 +6,13 @@ export const reportTokenAttemptOutcome: RequestHandler = async (req, res) => {
   const { attemptId, userWallet, mintAddress, outcome } = req.body;
   try {
     const scheduled = await tokenAttemptCleanup.cancel(attemptId, userWallet, mintAddress);
-    logger.info({ attemptId, userWallet, mintAddress, outcome, scheduled }, 'Token creation wallet signature rejected');
+    logger.info({ attemptId, userWallet, mintAddress, outcome, scheduled }, 'Token creation attempt ended before wallet signature');
   } catch (error) {
     logger.warn({
       attemptId,
       userWallet,
       errorName: error instanceof Error ? error.name : 'UnknownError',
-    }, 'Token creation rejected; IPFS cleanup will be retried');
+    }, 'Token attempt cleanup will be retried');
   }
   res.setHeader('Cache-Control', 'no-store');
   return res.status(202).json({ success: true });

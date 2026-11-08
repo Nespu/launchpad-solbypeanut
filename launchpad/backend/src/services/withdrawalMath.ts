@@ -3,10 +3,20 @@ export interface WithdrawalMathInput {
   lpSupplyRaw: string;
   baseReserveRaw: string;
   quoteReserveRaw: string;
-  solIsBase: boolean;
+  quoteIsBase?: boolean;
+  /** @deprecated Use quoteIsBase; retained for older internal callers. */
+  solIsBase?: boolean;
+  quoteDecimals?: number;
 }
 
 export interface WithdrawalMathResult {
+  totalQuoteOutRaw: bigint;
+  userAmountRaw: bigint;
+  platformFeeRaw: bigint;
+  quoteDecimals: number;
+  totalQuoteOut: number;
+  userAmount: number;
+  platformFee: number;
   totalSolOutLamports: bigint;
   userAmountLamports: bigint;
   platformFeeLamports: bigint;
@@ -17,7 +27,6 @@ export interface WithdrawalMathResult {
   platformFeeSol: number;
 }
 
-const LAMPORTS_PER_SOL_BIGINT = 1_000_000_000n;
 const UINT_PATTERN = /^(0|[1-9]\d*)$/;
 
 function parseRawAmount(value: string, label: string): bigint {
@@ -31,10 +40,6 @@ function proportionalAmount(reserve: bigint, lpAmount: bigint, lpSupply: bigint)
 
 function minAfterOnePercentSlippage(amount: bigint): bigint {
   return (amount * 99n) / 100n;
-}
-
-function lamportsToSol(lamports: bigint): number {
-  return Number(lamports) / Number(LAMPORTS_PER_SOL_BIGINT);
 }
 
 export function calculateWithdrawalAmounts(input: WithdrawalMathInput): WithdrawalMathResult {
@@ -54,21 +59,35 @@ export function calculateWithdrawalAmounts(input: WithdrawalMathInput): Withdraw
   // then floor the 1% slippage-adjusted minimum for each side.
   const baseAmount = proportionalAmount(baseReserve, lpAmount, lpSupply);
   const quoteAmount = proportionalAmount(quoteReserve, lpAmount, lpSupply);
-  const totalSolOutLamports = input.solIsBase ? baseAmount : quoteAmount;
-  const platformFeeLamports = (totalSolOutLamports * 10n) / 100n;
-  if (platformFeeLamports > BigInt(Number.MAX_SAFE_INTEGER)) {
-    throw new Error('Platform fee exceeds the safe lamport range');
+  const quoteIsBase = input.quoteIsBase ?? input.solIsBase;
+  if (quoteIsBase === undefined) throw new Error('The quote asset reserve side is required');
+  const totalQuoteOutRaw = quoteIsBase ? baseAmount : quoteAmount;
+  const platformFeeRaw = (totalQuoteOutRaw * 10n) / 100n;
+  const userAmountRaw = totalQuoteOutRaw - platformFeeRaw;
+  const quoteDecimals = input.quoteDecimals ?? 9;
+  if (!Number.isInteger(quoteDecimals) || quoteDecimals < 0 || quoteDecimals > 18) {
+    throw new Error('Quote token decimals are not supported');
   }
-  const userAmountLamports = totalSolOutLamports - platformFeeLamports;
+  const divisor = 10 ** quoteDecimals;
+  const totalQuoteOut = Number(totalQuoteOutRaw) / divisor;
+  const userAmount = Number(userAmountRaw) / divisor;
+  const platformFee = Number(platformFeeRaw) / divisor;
 
   return {
-    totalSolOutLamports,
-    userAmountLamports,
-    platformFeeLamports,
+    totalQuoteOutRaw,
+    userAmountRaw,
+    platformFeeRaw,
+    quoteDecimals,
+    totalQuoteOut,
+    userAmount,
+    platformFee,
+    totalSolOutLamports: totalQuoteOutRaw,
+    userAmountLamports: userAmountRaw,
+    platformFeeLamports: platformFeeRaw,
     baseMinAmountRaw: minAfterOnePercentSlippage(baseAmount),
     quoteMinAmountRaw: minAfterOnePercentSlippage(quoteAmount),
-    totalSolOut: lamportsToSol(totalSolOutLamports),
-    userAmountSol: lamportsToSol(userAmountLamports),
-    platformFeeSol: lamportsToSol(platformFeeLamports),
+    totalSolOut: totalQuoteOut,
+    userAmountSol: userAmount,
+    platformFeeSol: platformFee,
   };
 }

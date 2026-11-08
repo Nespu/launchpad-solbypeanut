@@ -37,6 +37,8 @@ function createHandlers(calls: { count: number; lastBody?: unknown; lastWallet?:
     createToken: handler,
     submitTransaction: handler,
     withdrawLiquidity: handler,
+    prepareLpBurn: handler,
+    prepareLpLock: handler,
     createPool: handler,
     submitPoolTransaction: handler,
     getLpBalance: handler,
@@ -52,7 +54,9 @@ async function startTestApi(rateLimitFactory: RateLimitFactory, resolveWalletSes
   const calls = { count: 0, lastBody: undefined as unknown, lastWallet: undefined as unknown };
   const app = express();
   app.use(express.json());
-  app.use('/api', createTokenRouter(createHandlers(calls), rateLimitFactory, resolveWalletSession));
+  const sessionResolver = resolveWalletSession ?? (async (req) =>
+    typeof req.body?.userWallet === 'string' ? req.body.userWallet : null);
+  app.use('/api', createTokenRouter(createHandlers(calls), rateLimitFactory, sessionResolver));
 
   const server: Server = createServer(app);
   await new Promise<void>((resolve, reject) => {
@@ -84,6 +88,97 @@ const validTokenRequest = (userWallet = address) => ({
   liquiditySol: 0.5,
 });
 
+test('LP burn preparation validates raw amounts and requires the matching wallet session', async () => {
+  const api = await startTestApi(
+    rateLimitFactory(createMemoryCounter()),
+    async (req) => req.body?.userWallet === address ? address : 'Vote111111111111111111111111111111111111111',
+  );
+
+  try {
+    const invalid = await fetch(`${api.baseUrl}/api/prepare-lp-burn`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userWallet: address, poolAddress: address, lpTokenAmount: '0' }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(api.calls.count, 0);
+
+    const valid = await fetch(`${api.baseUrl}/api/prepare-lp-burn`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userWallet: address, poolAddress: address, lpTokenAmount: '1200000000' }),
+    });
+    assert.equal(valid.status, 201);
+    assert.equal(api.calls.count, 1);
+    assert.equal(api.calls.lastWallet, address);
+  } finally {
+    await api.close();
+  }
+});
+
+test('LP burn preparation rejects a session that belongs to another wallet', async () => {
+  const api = await startTestApi(
+    rateLimitFactory(createMemoryCounter()),
+    async () => 'Vote111111111111111111111111111111111111111',
+  );
+
+  try {
+    const response = await fetch(`${api.baseUrl}/api/prepare-lp-burn`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userWallet: address, poolAddress: address, lpTokenAmount: '100' }),
+    });
+    assert.equal(response.status, 403);
+    assert.equal(api.calls.count, 0);
+  } finally {
+    await api.close();
+  }
+});
+
+test('LP lock preparation validates amount and requires the matching wallet session', async () => {
+  const api = await startTestApi(
+    rateLimitFactory(createMemoryCounter()),
+    async (req) => req.body?.userWallet === address ? address : 'Vote111111111111111111111111111111111111111',
+  );
+
+  try {
+    const invalid = await fetch(`${api.baseUrl}/api/prepare-lp-lock`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userWallet: address, poolAddress: address, lpTokenAmount: '0' }),
+    });
+    assert.equal(invalid.status, 400);
+    assert.equal(api.calls.count, 0);
+
+    const valid = await fetch(`${api.baseUrl}/api/prepare-lp-lock`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ userWallet: address, poolAddress: address, lpTokenAmount: '1200000000' }),
+    });
+    assert.equal(valid.status, 201);
+    assert.equal(api.calls.count, 1);
+    assert.equal(api.calls.lastWallet, address);
+
+    const wrongWallet = await startTestApi(
+      rateLimitFactory(createMemoryCounter()),
+      async () => 'Vote111111111111111111111111111111111111111',
+    );
+    try {
+      const rejected = await fetch(`${wrongWallet.baseUrl}/api/prepare-lp-lock`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ userWallet: address, poolAddress: address, lpTokenAmount: '1200000000' }),
+      });
+      assert.equal(rejected.status, 403);
+      assert.equal(wrongWallet.calls.count, 0);
+    } finally {
+      await wrongWallet.close();
+    }
+  } finally {
+    await api.close();
+  }
+});
+
 test('token route validates a request and passes parsed values to its handler', async () => {
   const api = await startTestApi(rateLimitFactory(createMemoryCounter()));
 
@@ -110,8 +205,28 @@ test('token route validates a request and passes parsed values to its handler', 
 
     assert.equal(validResponse.status, 201);
     assert.equal(api.calls.count, 1);
+    assert.equal(api.calls.lastWallet, address);
     assert.equal((api.calls.lastBody as { name: string }).name, 'Token');
     assert.deepEqual((api.calls.lastBody as { securityAssets: string[] }).securityAssets, []);
+  } finally {
+    await api.close();
+  }
+});
+
+test('token creation fails closed when wallet-session verification is unavailable', async () => {
+  const api = await startTestApi(
+    rateLimitFactory(createMemoryCounter()),
+    async () => { throw new Error('session store unavailable'); },
+  );
+
+  try {
+    const response = await fetch(`${api.baseUrl}/api/create-token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(validTokenRequest()),
+    });
+    assert.equal(response.status, 503);
+    assert.equal(api.calls.count, 0);
   } finally {
     await api.close();
   }

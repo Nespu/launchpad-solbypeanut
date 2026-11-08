@@ -1,0 +1,275 @@
+{
+  "title": "Wire · roadmap completo",
+  "summary": "Avance del alcance completo de Wire, incluidas las funciones Svarog/Vortex que siguen pendientes.",
+  "pollIntervalSeconds": 5,
+  "method": "Cada hito cuenta igual. Cerrado = 100%, listo para validar = 80%, en curso usa el porcentaje anotado en ese hito, y pendiente o bloqueado = 0%. Actualizamos el valor de los hitos en curso al terminar subentregas verificadas; es una estimación por alcance, no por horas.",
+  "phases": [
+    {
+      "id": "launch-liquidity",
+      "title": "Token y liquidez",
+      "items": [
+        {
+          "id": "token-wizard",
+          "title": "Flujo de lanzamiento: metadata, oferta y revisión de seguridad",
+          "status": "complete",
+          "note": "El flujo base está implementado y ya lo usaste para crear un token."
+        },
+        {
+          "id": "raydium-pool",
+          "title": "Crear una pool CPMM de Raydium en Devnet",
+          "status": "complete",
+          "note": "La creación de pool ya se probó desde Wire."
+        },
+        {
+          "id": "liquidity-withdrawal",
+          "title": "Consultar LP, retirar hasta el 100% y refrescar el estado tras el retiro",
+          "status": "complete",
+          "note": "El retiro total quedó reflejado en la pantalla de lanzamiento."
+        },
+        {
+          "id": "pumpfun-launch",
+          "title": "Crear tokens en Pump.fun Devnet",
+          "status": "ready_for_validation",
+          "note": "La integración con el SDK oficial está lista; falta revisar y aprobar el lanzamiento de prueba en Phantom."
+        },
+        {
+          "id": "legacy-pool",
+          "title": "Cerrar el caso de la pool antigua que no aparece en Devnet",
+          "status": "blocked",
+          "note": "El RPC público no encuentra esa dirección. Hace falta una dirección de pool válida para comprobar saldo y retiro."
+        },
+        {
+          "id": "lp-security",
+          "title": "Acciones de seguridad de liquidez: quemar LP o bloquearlos temporalmente",
+          "status": "ready_for_validation",
+          "note": "La quema LP y el bloqueo Streamflow de 180 días están conectados a Administrar liquidez para la wallet conectada o la wallet elegida de la bóveda. El bloqueo solo admite LP de la cuenta canónica SPL clásica; el backend consulta el fee-oracle vivo de Devnet, construye el mensaje Streamflow create_v2 y simula la transacción exacta antes de devolverla. El parser sigue el VestingFees oficial de 48 bytes (creation fee en offset 32 y token-lock fee en offset 44); la consulta actual de Devnet confirmó 100 lamports de creación y 0.10% en LP. Pasaron 18/18 pruebas focalizadas, la suite backend 147/147, build backend y typecheck frontend. La UI muestra fecha, fee en LP, cargo de Streamflow, tarifa de red y delta SOL simulado; verifica localmente wallet, pool, mint, cuentas, cantidad, plazo, hash y blockhash; exige confirmación explícita y guarda firmas pendientes para no reenviar. Tras confirmar, conserva la dirección del stream y la fecha para reclamarlo después en Streamflow. No se ha firmado ninguna transacción: falta probar lock y quema con una wallet/posición Devnet real y revisar la reclamación al vencer. El bloqueo no se puede cancelar ni retirar antes del plazo; Wire no controla el escrow."
+        }
+      ]
+    },
+    {
+      "id": "wallets-funds",
+      "title": "Wallets y fondos",
+      "items": [
+        {
+          "id": "vault-security",
+          "title": "Bóveda cifrada local para wallets de proyecto; claves privadas fuera del backend",
+          "status": "complete",
+          "note": "Las claves se cifran y permanecen en el navegador."
+        },
+        {
+          "id": "wallet-funding-history",
+          "title": "Financiar wallets y conservar el historial local de transferencias",
+          "status": "complete",
+          "note": "El historial guarda importes, destinos, firmas y estado."
+        },
+        {
+          "id": "wallet-assets-watch",
+          "title": "Balances SOL/SPL y seguimiento de direcciones públicas",
+          "status": "ready_for_validation",
+          "note": "La lectura está limitada a Devnet; falta revisar importación, exportación y estados visuales en escritorio y móvil."
+        },
+        {
+          "id": "token-disperse",
+          "title": "Token Disperse con lotes revisables y firma local",
+          "status": "ready_for_validation",
+          "note": "La distribución permite elegir otra wallet del vault como destinataria o pegar una dirección pública. Cada lote se revisa y firma manualmente en Devnet. Falta confirmar un lote pequeño y revisar destinatario, fees y resultado en Explorer."
+        },
+        {
+          "id": "token-sender-modes",
+          "title": "Token Sender: destinatarios nuevos, asignación por supply y financiación opcional",
+          "status": "in_progress",
+          "progressPercent": 98,
+          "note": "Token Disperse crea por cantidad wallets destinatarias dentro de la bóveda local cifrada y las añade a la lista. Puede generar importes editables por destinatario dentro de un rango aleatorio del supply actual verificado del mint; el máximo agregado no supera el 100% y el total debe caber en el saldo disponible. La financiación SOL opcional envía un importe igual por destinatario desde la wallet de origen en el mismo lote token; ambos importes, rent y fees se simulan, revisan y requieren firma local manual. El usuario elige 1–4 destinatarios por lote y un retardo base de 0–300 s más jitter aleatorio de 0–120 s entre lotes confirmados. El plazo se conserva al recargar y solo habilita el siguiente botón manual. El límite de 0–5 fallos permite omitir solo errores on-chain confirmados; lotes inciertos o con errores RPC permanecen detenidos y nunca se reintentan automáticamente. La wallet conectada y la bóveda local ya pueden ser origen; el plan conserva el tipo de firmante. Falta revisar con tokens disponibles y validar un lote pequeño de Devnet."
+        },
+        {
+          "id": "vault-liquidity-withdrawal",
+          "title": "Consultar pools y retirar LP con la wallet creadora elegida de la bóveda",
+          "status": "ready_for_validation",
+          "note": "La bóveda autentica el address elegido con un reto Wire, carga sus pools y firma localmente solo el retiro revisado. La clave no se envía al backend; falta una aceptación visual y una firma de Devnet del usuario."
+        }
+      ]
+    },
+    {
+      "id": "trading",
+      "title": "Compra, venta y ejecución multiwallet",
+      "items": [
+        {
+          "id": "raydium-swap",
+          "title": "Compra/venta en Raydium con cotización, slippage, límites y verificación",
+          "status": "complete",
+          "note": "El flujo se implementó y ya probaste una compra y una venta en Devnet."
+        },
+        {
+          "id": "multiwallet-trading",
+          "title": "Compras secuenciales multiwallet, pausas y revisión antes de cada firma",
+          "status": "ready_for_validation",
+          "note": "Cada clic ahora autoriza una sola wallet identificada y su transacción independiente. La pausa se conserva como cuenta regresiva al recargar, pero nunca firma ni envía por sí sola; una cotización cambiada exige otra revisión. Falta aceptación visual y Devnet."
+        },
+        {
+          "id": "launch-buy-plan",
+          "title": "Trasladar el plan de compra del lanzamiento a la ficha del token",
+          "status": "complete",
+          "note": "El plan requiere cotizar y confirmar las operaciones manualmente."
+        },
+        {
+          "id": "pumpfun-swaps",
+          "title": "Comprar y vender en bonding curves de Pump.fun",
+          "status": "ready_for_validation",
+          "note": "Falta una compra y venta de prueba revisadas y firmadas por ti en Phantom."
+        },
+        {
+          "id": "pumpswap-routing",
+          "title": "Detectar graduación y enrutar swaps a PumpSwap",
+          "status": "ready_for_validation",
+          "note": "La ruta y las verificaciones están conectadas; falta una prueba real tras graduación."
+        },
+        {
+          "id": "external-markets",
+          "title": "Validar importación de swaps de AMM V4, Stable AMM y CLMM",
+          "status": "in_progress",
+          "progressPercent": 68,
+          "note": "V4/CLMM y Stable tienen pruebas para exact-in/out, estado de pool y límites de balance. Revalidación Devnet 2026-10-27 UTC: el RPC devuelve 21 cuentas del programa Stable; una decodifica como cuenta de pool, pero las cuentas de sus dos mints, LP, vaults y mercado ya no existen. La API Devnet lista 100 pools sin Stable y responde null al pedir esa dirección. Las 100 firmas del pool son de 2022; la firma revisada no tiene token balances y contiene dos instrucciones top-level Stable, así que el verificador la rechaza como no única. Falta una pool operativa con un swap confirmado y balances importables."
+        },
+        {
+          "id": "jito-bundles",
+          "title": "Fast Bundle atómico y Fast Bundle + Timed Buys",
+          "status": "pending",
+          "note": "La documentación oficial de Jito publica endpoints para Mainnet y Testnet, pero no Devnet. Se conserva como función del roadmap para una red compatible; no se simula atomicidad con la secuencia secuencial actual de Wire."
+        },
+        {
+          "id": "launch-automation",
+          "title": "Timed Buys por lanzamiento, Snipe, Retry, Smart Sell/Auto TP y buy tasks",
+          "status": "in_progress",
+          "progressPercent": 75,
+          "note": "El plan previo de compra se aplica a lanzamientos Raydium y Pump.fun: importe igual o personalizado por wallet, total visible y compra disponible al existir mercado. El panel multiwallet ofrece Timed Buys en una secuencia limitada a 10 wallets: cotiza y presenta cantidades, direcciones públicas, resultados mínimos, comisiones, slippage y tope agregado; exige autorización independiente por corrida, firma local y opera solo en Devnet mientras la página queda abierta. Usa esperas aleatorias de 0–30 s, no reanuda tras recarga y se detiene ante deriva de cotización, fallo de conexión/preparación, firma incierta, bloqueo de vault o cierre. Cada corrida autoriza un límite de 1–5 fallos on-chain consecutivos (predeterminado: 1): solo esos fallos confirmados permiten omitir la wallet y continuar con la siguiente ya revisada hasta el límite. La wallet fallida nunca se reintenta automáticamente. Se añadió un disparador inicial de apertura de mercado: revisa cotizaciones válidas cada 5 s durante un máximo de 15 min, con wallets/importes y límites fijados de antemano, autorización explícita y reserva de fees; no firma antes de activarse y cancela ante cambios del plan, pestaña oculta, bloqueo o revisión fallida. Las compras propias se identifican como tales, sin fingir demanda ni ocultar relaciones. Pasan pruebas enfocadas, typecheck, detector y rutas HTTP. Faltan revisión visual y prueba Devnet aprobada por el usuario, además del disparador integrado al lanzamiento, Snipe avanzado, Smart Sell/Auto TP automático, tareas programables, Retry y cancelación automática completa."
+        }
+      ]
+    },
+    {
+      "id": "history-analytics",
+      "title": "Historial y analítica",
+      "items": [
+        {
+          "id": "verified-history",
+          "title": "Historial verificado, paginado y separado por mercado",
+          "status": "complete",
+          "note": "Incluye Raydium, Pump.fun y PumpSwap; ya viste tu swap aparecer en la actividad."
+        },
+        {
+          "id": "external-swap-import",
+          "title": "Importar y verificar swaps externos de mercados compatibles",
+          "status": "ready_for_validation",
+          "note": "La lógica y las pruebas están; falta revisar casos reales importados desde una wallet."
+        },
+        {
+          "id": "fifo-pnl",
+          "title": "PnL realizado FIFO y aviso cuando el historial está incompleto",
+          "status": "in_progress",
+          "progressPercent": 95,
+          "note": "El FIFO incorpora movimientos SPL simples y solo calcula PnL sobre lotes con costo conocido. Traslada localmente costo FIFO conocido en transferencias simples verificadas entre la wallet conectada y una wallet de bóveda asociada explícitamente. El escaneo consulta la wallet, sus cuentas SPL/Token-2022 abiertas y las ATA canónicas de ambos programas; descubre además cuentas propias no asociadas en balances pre/post y pagina sus firmas. Reconoce depósitos y retiros Raydium solo en pools registradas cuando la transacción identifica exactamente una pool, coincide con el programa oficial detectado desde el owner del mint LP, cambia el balance LP exacto y mueve al menos un activo subyacente registrado, sin cambios SPL ajenos a esos activos. El depósito consume lotes de los activos; las participaciones LP quedan con base desconocida. El retiro elimina esas participaciones y añade activos con base desconocida; no inventa ni transfiere costo a través de LP. Cobertura e historial siguen parciales ante páginas, detalles o RPC incompletos, eventos ambiguos/no compatibles y pools no registradas. Falta validar cobertura con una wallet y actividad real en Devnet."
+        },
+        {
+          "id": "full-portfolio-pnl",
+          "title": "PnL completo con actividad externa, transferencias, liquidez y precios verificables",
+          "status": "in_progress",
+          "progressPercent": 55,
+          "note": "La consulta manual lee firmas de cuentas SPL/Token-2022 para buscar actividad externa. FIFO expone inventario reconstruido y separa costo conocido/desconocido. Un panel independiente consulta SOL nativo y todas las cuentas abiertas SPL/Token-2022 en Devnet, lista balances aunque Wire no tenga swaps y solo coteja FIFO con datos comparables. Para el balance completo, Wire cotiza Raydium CPMM contra SOL/USDC y detecta curvas/pools canónicas Pump.fun/PumpSwap; usa estado on-chain actual sin preparar ni firmar ventas. También detecta cambios de liquidez de pools Raydium registradas bajo coincidencia estricta de pool, programa oficial, mint LP y deltas subyacentes. FIFO consume el costo conocido al depositar, pero registra LP y activos retirados con base desconocida para no fingir que el costo pasa por las participaciones. La UI etiqueta el evento como movimiento de liquidez, no como swap. El cotejo económico permanece deshabilitado con fuentes incompletas o retiros aproximados. Cantidades pro-rata LP CPMM/V4 son estimaciones de reservas actuales, no valor de mercado ni garantía de retiro; V5 solo expone balance. Se rechazan datos mal formados y RPC incompleto. Faltan wallet real/visual, pools no registradas y otros venues, fuentes históricas de precios, costo económico a través de LP y valoración de mercado."
+        },
+        {
+          "id": "leaders-ranking",
+          "title": "Leaders y ranking con métricas, periodo y controles contra manipulación",
+          "status": "pending",
+          "note": "La métrica y el tratamiento de privacidad aún deben definirse."
+        }
+      ]
+    },
+    {
+      "id": "svarog-suite",
+      "title": "Funciones avanzadas Svarog/Vortex",
+      "items": [
+        {
+          "id": "batch-launch",
+          "title": "Lanzamientos por lote con revisión y firma individual",
+          "status": "ready_for_validation",
+          "note": "El asistente guarda hasta cinco borradores por wallet en IndexedDB y carga cada uno en el paso de revisión; cada token requiere una firma independiente. Las firmas pendientes se reintentan con los mismos bytes, sin firmar de nuevo. Pasó typecheck frontend y 5 pruebas de validación; falta probar un lanzamiento firmado en Devnet."
+        },
+        {
+          "id": "bump-market-maker",
+          "title": "Bump Bot y market maker con actividad identificable y límites",
+          "status": "pending",
+          "note": "No incluirá volumen artificial ni ocultará la relación entre wallets."
+        },
+        {
+          "id": "creator-fee-claims",
+          "title": "Consultar y retirar creator fees de Pump.fun y PumpSwap",
+          "status": "ready_for_validation",
+          "note": "Consulta Devnet y transacción sin firma listas. Permite wallet conectada o bóveda local, con un solo creador elegido; falta una prueba con fees reales y aprobación del usuario."
+        },
+        {
+          "id": "creator-fee-sharing",
+          "title": "Configurar y distribuir creator fees entre varios destinatarios",
+          "status": "ready_for_validation",
+          "note": "Implementado en Devnet: wallet conectada o wallet de bóveda como única firmante; destinatarios wallet y cuenta personal de GitHub; cuentas sociales se inicializan en una transacción aparte y el reparto permanente requiere una segunda revisión explícita. La distribución barre Pump.fun/PumpSwap y verifica la firma. Pasó build/typecheck y 5 pruebas específicas; falta la prueba real con firma. GitHub se reclama en Pump.fun y Wire no verifica la identidad social."
+        },
+        {
+          "id": "holder-rewards",
+          "title": "Selección y explicación de Holder Rewards en Pump.fun",
+          "status": "ready_for_validation",
+          "note": "Wire consulta la puerta del programa y la desactiva cuando Pump no acepta nuevas monedas; en Devnet está apagada. Pump maneja la distribución a holders; no hay retiro manual desde Wire."
+        },
+        {
+          "id": "market-follow",
+          "title": "Seguimiento del mercado tras crear el token",
+          "status": "ready_for_validation",
+          "note": "La ficha del token consulta una cotización de compra en Devnet cada 30 segundos y permite activar un aviso local de venta por importe y mínimo de retorno estimado. La cotización de venta identifica el mercado y enlaza su dirección en Explorer; consulta cada 30 segundos mientras la ficha está visible. Al alcanzar el objetivo, un botón abre el panel de venta con el importe y pide una cotización nueva. No usa la bóveda, no firma ni envía; las cotizaciones son puntuales y no garantizan ejecución. Falta revisión visual."
+        },
+        {
+          "id": "vortex-task-catalog",
+          "title": "Catálogo y ciclo de vida de tareas Svarog/Vortex para Solana",
+          "status": "in_progress",
+          "progressPercent": 17,
+          "note": "Abrí este hito con /tasks: una lista bilingüe de secuencias multiwallet guardadas, filtros por estado y acceso a la ficha del token para revisar firmas o continuar wallets pendientes. El estado persistido ahora distingue lista, en curso, pausada, detenida, completada y fallida; una tarea restaurada como en curso pasa a pausada, nunca se reanuda automáticamente, y continuar exige desbloquear la bóveda y autorizar de nuevo la secuencia revisada. La ficha desplegable muestra wallet, estado, importes revisados y mínimos, fees, detalles del resultado y enlaces de firmas a Explorer. La lista y su parser no firman ni inician corridas. Typecheck frontend, 17 pruebas enfocadas del modelo y GET /tasks HTTP 200 pasaron. La paridad de ejecución elegida es autoejecución local solo tras autorización explícita de cada corrida, con bóveda desbloqueada y página abierta. Faltan las acciones del ciclo de vida y el historial completo de ejecución, además de Snipe, Anti-Sniper, Migrate & Buy, Holder/Pro Trader Boost, Hand Switcher, Wallet Warm-up, órdenes límite, Ladder, Mirror, DCA, Trailing Stop y lanzamientos programados. Fake Volume y Mixer continúan registrados para revisión porque chocan con el principio de no fabricar demanda ni ocultar relaciones."
+        }
+      ]
+    },
+    {
+      "id": "quality-release",
+      "title": "Validación y cierre",
+      "items": [
+        {
+          "id": "responsive-review",
+          "title": "Revisión visual de escritorio y móvil para operaciones densas",
+          "status": "in_progress",
+          "progressPercent": 55,
+          "note": "Balances, trading multiwallet y Token Disperse ajustan cifras largas; acciones de wallet, vault, lanzamiento, swaps, creator fees, creación de pool y retiro usan controles de al menos 44 px. El typecheck y el detector pasaron. En 2026-11-03, /project-progress y /wallets pasaron revisión móvil a 320/390 px; /manage-liquidity pasó a 320/390 y escritorio. También revisé Token Disperse en una bóveda de prueba aislada a 320/390 px: sin desbordamiento, los 17 controles inspeccionados miden 44 px y la consola no reportó errores. La wallet de prueba no tenía saldo token, por lo que los controles de cotización/envío permanecieron deshabilitados; la interacción con token activo sigue pendiente. Se corrigieron además los saltos de texto y la proporción declarada de logos. Falta revisar trading denso y Token Disperse con balance real. El 2026-11-04, /seguridad#guia-rapida pasó revisión a 320 y 390 px en inglés: sin desbordamiento horizontal, 15 controles/enlaces visibles de al menos 44 px y cero errores de consola; la FAQ bilingüe se renderizó en español e inglés. El 2026-11-04 corregí el mínimo de ancho del body para que respete el área visible y recorté el fondo full-bleed en el borde del viewport; el enlace a Mis wallets del estado vacío ahora tiene un objetivo de al menos 44 px. En contexto aislado, /, /wallets, /manage-liquidity y /seguridad#guia-rapida pasaron a 320/390 px; /manage-liquidity pasó también a 1280 px. No hay desplazamiento horizontal, controles visibles menores de 44 px ni errores de consola. El typecheck frontend pasó."
+        },
+        {
+          "id": "devnet-acceptance",
+          "title": "Pruebas firmadas de USDC, Token Disperse, Pump.fun y PumpSwap",
+          "status": "ready_for_validation",
+          "note": "Wire no firma por ti: revisarás y aprobarás cada transacción de Devnet en Phantom."
+        },
+        {
+          "id": "stable-amm-proof",
+          "title": "Confirmar el importador Stable AMM con una pool real de Devnet",
+          "status": "blocked",
+          "note": "Comprobado 2026-10-27 UTC: hay una cuenta de pool decodificable (AF9HRbaa8MvYiUfXkgZU6kzCzN51AqE4D8qBQ8wTn4T7), pero sus cuentas de mint, LP, vaults y mercado no están en Devnet; Raydium API devuelve null y las firmas disponibles son de 2022 sin balances de tokens. El verificador de Wire rechaza la firma probada porque no contiene un único swap Stable directo verificable. Se mantiene bloqueado hasta que exista una pool activa y un swap confirmado que el RPC pueda verificar."
+        },
+        {
+          "id": "automated-quality",
+          "title": "Pruebas backend, build, salud de servicios y localización",
+          "status": "complete",
+          "note": "Última revisión el 2026-10-24: suite backend 133/133, build backend, suite de utilidades frontend 62/62, typecheck frontend y health checks de los servicios. Los hallazgos de npm audit quedan registrados como preparación de Mainnet; no se consideran resueltos por estas verificaciones de Devnet. La revisión visual y las firmas reales siguen en sus hitos de aceptación."
+        },
+        {
+          "id": "docs-support",
+          "title": "Completar documentación, páginas legales y canales de soporte",
+          "status": "in_progress",
+          "progressPercent": 62,
+          "note": "La guía rápida bilingüe explica wallet/sesión, fees, saldo LP cero, diferencia entre quemar, bloquear y retirar LP, Pump.fun/PumpSwap, cotizaciones, vigilancia, cancelación y PnL parcial. Aclara depósitos/retiros LP, el bloqueo Streamflow de 180 días, la fecha de reclamo y que Wire no puede cancelar el escrow. También explica que un swap confirmado en Devnet puede tardar en registrarse en historial; reintentar usa la misma firma y no vuelve a enviar. La guía bilingüe cubre Timed Buys y el disparador inicial de apertura de mercado: autorización limitada, wallets/importes/límites, Devnet, esperas, expiración, cancelaciones y compras propias sin atribuirlas a demanda externa. Pasaron typecheck, detector Impeccable y rutas HTTP de /seguridad. Siguen pendientes revisión visual, revisión legal del producto y elegir un canal oficial de soporte. La guía también explica el límite de 1–5 fallos confirmados consecutivos (predeterminado: 1), que solo se continúa hacia la siguiente wallet ya revisada y que los errores de conexión o resultados inciertos siempre detienen la secuencia; las cadenas están en español e inglés. La guía bilingüe ahora incluye Token Disperse: origen conectado o de bóveda, revisión de destinatarios, cantidades, rent y fees, aprobación manual por lote, pausa y manejo de resultados inciertos."
+        }
+      ]
+    }
+  ],
+  "updatedAt": "2026-11-04T02:40:51Z"
+}

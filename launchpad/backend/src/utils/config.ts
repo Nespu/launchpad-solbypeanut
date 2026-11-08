@@ -56,8 +56,8 @@ try {
 if (!['https:', 'http:'].includes(parsedRpcEndpoint.protocol) || (isProduction && parsedRpcEndpoint.protocol !== 'https:')) {
   throw new Error("RPC_ENDPOINT must use HTTPS in production");
 }
-if (!isProduction && !/devnet/i.test(rpcEndpoint)) {
-  throw new Error("RPC_ENDPOINT must target Devnet outside production");
+if (!/devnet/i.test(rpcEndpoint)) {
+  throw new Error("RPC_ENDPOINT must target Devnet until Mainnet is explicitly enabled");
 }
 
 const defaultCorsOrigins = "http://localhost:3000,http://127.0.0.1:3000";

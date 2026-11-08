@@ -3,8 +3,20 @@ export type TokenAttemptRecord = {
   userWallet: string;
   mintAddress?: string;
   txHash?: string;
+  pumpLaunch?: PumpLaunchIntent;
   cids: string[];
   createdAt: number;
+};
+
+export type PumpLaunchIntent = {
+  messageHash: string;
+  lastValidBlockHeight: number;
+  holderReward?: boolean;
+  name: string;
+  symbol: string;
+  description: string;
+  imageUrl: string;
+  metadataCid: string;
 };
 
 export type AttemptStore = {
@@ -61,6 +73,17 @@ function parseRecord(raw: string | null): TokenAttemptRecord | null {
       !parsed.cids.every((cid) => typeof cid === 'string') ||
       typeof parsed.createdAt !== 'number'
     ) return null;
+    if (parsed.pumpLaunch !== undefined && (
+      !parsed.pumpLaunch ||
+      typeof parsed.pumpLaunch.messageHash !== 'string' ||
+      !Number.isSafeInteger(parsed.pumpLaunch.lastValidBlockHeight) ||
+      typeof parsed.pumpLaunch.name !== 'string' ||
+      typeof parsed.pumpLaunch.symbol !== 'string' ||
+      typeof parsed.pumpLaunch.description !== 'string' ||
+      typeof parsed.pumpLaunch.imageUrl !== 'string' ||
+      typeof parsed.pumpLaunch.metadataCid !== 'string' ||
+      (parsed.pumpLaunch.holderReward !== undefined && typeof parsed.pumpLaunch.holderReward !== 'boolean')
+    )) return null;
     return parsed;
   } catch {
     return null;
@@ -73,7 +96,7 @@ export function createTokenAttemptCleanupService(
 ) {
   const now = dependencies.now ?? Date.now;
   let sweepTimer: NodeJS.Timeout | undefined;
-  let sweeping = false;
+  let sweepInFlight: Promise<{ cleaned: number; preserved: number; deferred: number }> | undefined;
 
   async function getRecord(attemptId: string): Promise<TokenAttemptRecord | null> {
     return parseRecord(await store.get(`${RECORD_PREFIX}${attemptId}`));
@@ -133,6 +156,37 @@ export function createTokenAttemptCleanupService(
     return 'cleaned';
   }
 
+  async function sweepExpired(): Promise<{ cleaned: number; preserved: number; deferred: number }> {
+    if (sweepInFlight) return sweepInFlight;
+    const currentSweep = (async () => {
+      const counts = { cleaned: 0, preserved: 0, deferred: 0 };
+      const due = await store.zrangebyscore(EXPIRY_INDEX, 0, now(), 'LIMIT', 0, SWEEP_BATCH_SIZE);
+      for (const attemptId of due) {
+        try {
+          const record = await getRecord(attemptId);
+          if (!record) {
+            await store.zrem(EXPIRY_INDEX, attemptId);
+            continue;
+          }
+          const result = await cleanRecord(record);
+          counts[result] += 1;
+        } catch (error) {
+          dependencies.onCleanupError?.(attemptId, error);
+          const record = await getRecord(attemptId);
+          if (record) await defer(record);
+          counts.deferred += 1;
+        }
+      }
+      return counts;
+    })();
+    sweepInFlight = currentSweep;
+    try {
+      return await currentSweep;
+    } finally {
+      if (sweepInFlight === currentSweep) sweepInFlight = undefined;
+    }
+  }
+
   return {
     async begin(attemptId: string, userWallet: string): Promise<void> {
       const key = `${RECORD_PREFIX}${attemptId}`;
@@ -166,6 +220,25 @@ export function createTokenAttemptCleanupService(
       await saveRecord(record);
     },
 
+    async setPumpLaunchIntent(
+      attemptId: string,
+      userWallet: string,
+      mintAddress: string,
+      intent: PumpLaunchIntent,
+    ): Promise<void> {
+      const record = await getRecord(attemptId);
+      if (!record || record.userWallet !== userWallet) throw new Error('Token creation attempt not found');
+      record.mintAddress = mintAddress;
+      record.pumpLaunch = intent;
+      await saveRecord(record);
+    },
+
+    async getPumpLaunchIntent(attemptId: string, userWallet: string): Promise<TokenAttemptRecord | null> {
+      const record = await getRecord(attemptId);
+      if (!record || record.userWallet !== userWallet || !record.pumpLaunch) return null;
+      return record;
+    },
+
     async markSubmitted(attemptId: string | undefined, userWallet: string, txHash: string): Promise<void> {
       if (!attemptId) return;
       const record = await getRecord(attemptId);
@@ -197,46 +270,21 @@ export function createTokenAttemptCleanupService(
       return true;
     },
 
-    async sweepExpired(): Promise<{ cleaned: number; preserved: number; deferred: number }> {
-      if (sweeping) return { cleaned: 0, preserved: 0, deferred: 0 };
-      sweeping = true;
-      const counts = { cleaned: 0, preserved: 0, deferred: 0 };
-      try {
-        const due = await store.zrangebyscore(EXPIRY_INDEX, 0, now(), 'LIMIT', 0, SWEEP_BATCH_SIZE);
-        for (const attemptId of due) {
-          try {
-            const record = await getRecord(attemptId);
-            if (!record) {
-              await store.zrem(EXPIRY_INDEX, attemptId);
-              continue;
-            }
-            const result = await cleanRecord(record);
-            counts[result] += 1;
-          } catch (error) {
-            dependencies.onCleanupError?.(attemptId, error);
-            const record = await getRecord(attemptId);
-            if (record) await defer(record);
-            counts.deferred += 1;
-          }
-        }
-        return counts;
-      } finally {
-        sweeping = false;
-      }
-    },
+    sweepExpired,
 
     start(onError: (error: unknown) => void = () => undefined): void {
       if (sweepTimer) return;
       sweepTimer = setInterval(() => {
-        void this.sweepExpired().catch(onError);
+        void sweepExpired().catch(onError);
       }, SWEEP_INTERVAL_MS);
       sweepTimer.unref();
-      void this.sweepExpired().catch(onError);
+      void sweepExpired().catch(onError);
     },
 
-    stop(): void {
+    async stop(): Promise<void> {
       if (sweepTimer) clearInterval(sweepTimer);
       sweepTimer = undefined;
+      await sweepInFlight?.catch(() => undefined);
     },
   };
 }

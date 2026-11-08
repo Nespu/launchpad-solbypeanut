@@ -75,6 +75,24 @@ test('withdrawal math keeps large raw amounts exact with BigInt', () => {
   assert.equal(result.userAmountLamports, 8106479329266894n);
 });
 
+test('withdrawal math supports six-decimal quote assets such as Devnet USDC', () => {
+  const result = calculateWithdrawalAmounts({
+    lpAmountRaw: '1000',
+    lpSupplyRaw: '10000',
+    baseReserveRaw: '250000000',
+    quoteReserveRaw: '100000000',
+    solIsBase: false,
+    quoteDecimals: 6,
+  });
+
+  assert.equal(result.totalQuoteOutRaw, 10_000_000n);
+  assert.equal(result.platformFeeRaw, 1_000_000n);
+  assert.equal(result.userAmountRaw, 9_000_000n);
+  assert.equal(result.totalQuoteOut, 10);
+  assert.equal(result.platformFee, 1);
+  assert.equal(result.quoteDecimals, 6);
+});
+
 test('withdrawal math rejects zero, malformed, and over-supply LP amounts', () => {
   const base = { lpSupplyRaw: '100', baseReserveRaw: '1000', quoteReserveRaw: '1000', solIsBase: true };
   assert.throws(() => calculateWithdrawalAmounts({ ...base, lpAmountRaw: '0' }), /greater than zero/);

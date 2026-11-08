@@ -1,0 +1,2 @@
+ALTER TABLE "FeePayment"
+  ADD COLUMN IF NOT EXISTS "amountLamports" BIGINT;

@@ -1,0 +1,2 @@
+ALTER TABLE "Token"
+ADD COLUMN "holderReward" BOOLEAN NOT NULL DEFAULT false;

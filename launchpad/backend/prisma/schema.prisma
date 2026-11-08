@@ -14,6 +14,7 @@ model Token {
   symbol        String
   description   String?
   imageUrl      String
+  metadataCid   String?
   totalSupply   BigInt
   liquiditySol  Float
   creatorWallet String
@@ -21,6 +22,14 @@ model Token {
   copiedFrom    String?
   txHash        String
   poolAddress   String?
+  poolQuoteMint String   @default("So11111111111111111111111111111111111111112")
+  pendingPoolAddress String?
+  pendingPoolQuoteMint String?
+  pendingPoolMessageHash String?
+  pendingPoolLastValidBlockHeight BigInt?
+  launchPlatform String   @default("RAYDIUM")
+  bondingCurveAddress String?
+  holderReward   Boolean  @default(false)
   status        String   @default("created")
   
   // Assets de seguridad
@@ -28,15 +37,20 @@ model Token {
   lockDuration  Int?     // Días de bloqueo (ej. 180)
   lockTxHash    String?  // Hash de la transacción de bloqueo
   auditStatus   String?  // "verified" o "pending"
+
+  @@index([creatorWallet, createdAt])
 }
 
 model FeePayment {
-  id          String   @id @default(cuid())
-  userWallet  String
-  tokenMint   String   @unique
-  amountSol   Float
-  txHash      String
-  createdAt   DateTime @default(now())
+  id             String   @id @default(cuid())
+  userWallet     String
+  tokenMint      String   @unique
+  amountSol      Float
+  amountLamports BigInt?
+  txHash          String
+  createdAt      DateTime @default(now())
+
+  @@index([userWallet, createdAt])
 }
 
 // ============================================================
@@ -44,13 +58,51 @@ model FeePayment {
 // ============================================================
 
 model Withdrawal {
-  id            String   @id @default(cuid())
-  userWallet    String
-  poolAddress   String
-  lpTokenAmount Float
-  userAmount    Float
-  platformFee   Float
-  status        String   @default("pending") // pending, completed, failed
-  txHash        String?
-  createdAt     DateTime @default(now())
+  id                     String   @id @default(cuid())
+  userWallet             String
+  poolAddress            String
+  lpTokenAmount          Float
+  userAmount             Float
+  platformFee            Float
+  status                 String   @default("pending") // pending, completed, failed, expired, expired_unverified
+  txHash                 String?
+  verifiedTxHash         String?  @unique
+  transactionMessageHash String?
+  lastValidBlockHeight   BigInt?
+  lpTokenAmountRaw       Decimal? @db.Decimal(20, 0)
+  userAmountLamports     BigInt?
+  platformFeeLamports    BigInt?
+  quoteAmountRaw         BigInt?
+  platformFeeRaw         BigInt?
+  quoteMint              String   @default("So11111111111111111111111111111111111111112")
+  quoteDecimals          Int      @default(9)
+  createdAt              DateTime @default(now())
+
+  @@index([status, lastValidBlockHeight])
+  @@index([userWallet, createdAt])
+}
+
+model Swap {
+  id             String   @id @default(cuid())
+  signature      String   @unique
+  userWallet     String
+  mintAddress    String
+  poolAddress    String
+  venue          String   @default("RAYDIUM")
+  side           String
+  tokenAmountRaw Decimal  @db.Decimal(30, 0)
+  solAmountLamports BigInt?
+  quoteAmountRaw Decimal? @db.Decimal(30, 0)
+  quoteMint      String   @default("So11111111111111111111111111111111111111112")
+  quoteDecimals  Int      @default(9)
+  tokenDecimals  Int
+  slot           BigInt
+  blockTime      DateTime?
+  networkFeeLamports BigInt?
+  createdAt      DateTime @default(now())
+
+  @@index([userWallet, createdAt])
+  @@index([userWallet, slot])
+  @@index([mintAddress, createdAt])
+  @@index([poolAddress, createdAt])
 }

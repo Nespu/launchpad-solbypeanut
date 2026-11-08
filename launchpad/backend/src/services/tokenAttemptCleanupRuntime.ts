@@ -10,17 +10,48 @@ import { createTokenAttemptCleanupService } from './tokenAttemptCleanup';
 
 export const tokenAttemptCleanup = createTokenAttemptCleanupService(getRedisClient(), {
   async isCidReferenced(cid) {
-    const tokens = await prisma.token.findMany({ select: { mintAddress: true, imageUrl: true } });
-    if (tokens.some((token) => token.imageUrl.includes(`/ipfs/${cid}`))) return true;
+    const knownReference = await prisma.token.findFirst({
+      where: {
+        OR: [
+          { metadataCid: cid },
+          { imageUrl: { contains: `/ipfs/${cid}` } },
+        ],
+      },
+      select: { id: true },
+    });
+    if (knownReference) return true;
 
-    for (const token of tokens) {
-      const mint = new PublicKey(token.mintAddress);
-      const [metadataAddress] = PublicKey.findProgramAddressSync(
-        [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
-        METADATA_PROGRAM_ID,
-      );
-      const metadata = await Metadata.fromAccountAddress(connection, metadataAddress, 'confirmed');
-      if (cleanMetadataText(metadata.data.uri).includes(`/ipfs/${cid}`)) return true;
+    // Older rows predate metadataCid. Scan those in bounded pages and consult
+    // chain metadata only for them, so each cleanup pass never materializes
+    // the entire Token table in memory.
+    const pageSize = 100;
+    let afterId: string | undefined;
+    while (true) {
+      const legacyTokens = await prisma.token.findMany({
+        where: {
+          metadataCid: null,
+          ...(afterId ? { id: { gt: afterId } } : {}),
+        },
+        orderBy: { id: 'asc' },
+        take: pageSize,
+        select: { id: true, mintAddress: true },
+      });
+      if (legacyTokens.length === 0) break;
+
+      for (const token of legacyTokens) {
+        const mint = new PublicKey(token.mintAddress);
+        const [metadataAddress] = PublicKey.findProgramAddressSync(
+          [Buffer.from('metadata'), METADATA_PROGRAM_ID.toBuffer(), mint.toBuffer()],
+          METADATA_PROGRAM_ID,
+        );
+        const metadataAccount = await connection.getAccountInfo(metadataAddress, 'confirmed');
+        if (!metadataAccount) continue;
+        const metadata = await Metadata.fromAccountAddress(connection, metadataAddress, 'confirmed');
+        if (cleanMetadataText(metadata.data.uri).includes(`/ipfs/${cid}`)) return true;
+      }
+
+      afterId = legacyTokens[legacyTokens.length - 1].id;
+      if (legacyTokens.length < pageSize) break;
     }
     return false;
   },
@@ -40,6 +71,9 @@ export const tokenAttemptCleanup = createTokenAttemptCleanupService(getRedisClie
   },
 
   onCleanupError(attemptId, error) {
-    logger.warn({ attemptId, err: error }, 'Deferred cleanup of abandoned token uploads');
+    logger.warn(
+      { attemptId, errorName: error instanceof Error ? error.name : 'UnknownError' },
+      'Deferred cleanup of abandoned token uploads',
+    );
   },
 });

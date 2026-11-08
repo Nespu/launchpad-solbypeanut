@@ -1,0 +1,2 @@
+ALTER TABLE "Token"
+  ADD COLUMN IF NOT EXISTS "metadataCid" TEXT;

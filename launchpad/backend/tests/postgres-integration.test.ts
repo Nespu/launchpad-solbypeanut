@@ -1,14 +1,17 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { PrismaClient } from '@prisma/client';
-import type { Connection } from '@solana/web3.js';
+import bs58 from 'bs58';
+import { Keypair, PublicKey, SystemProgram, Transaction, type Connection } from '@solana/web3.js';
 import type { Request, Response } from 'express';
 import { createGetMyPoolsHandler, createUpdateWithdrawalResultHandler } from '../src/controllers/tokenControllerHandlers';
 import { cleanMetadataText } from '../src/utils/metadataText';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const integrationTest: typeof test = testDatabaseUrl ? test : test.skip;
-const creatorWallet = '11111111111111111111111111111111';
+const creator = Keypair.generate();
+const creatorWallet = creator.publicKey.toBase58();
 const otherWallet = 'Vote111111111111111111111111111111111111111';
 const poolAddress = 'SysvarRent111111111111111111111111111111111';
 
@@ -88,6 +91,17 @@ integrationTest('PostgreSQL persists pool filtering and confirmed withdrawal sta
     [`${tokenPrefix}pool`],
   );
 
+  const withdrawalTransaction = new Transaction({
+    feePayer: creator.publicKey,
+    recentBlockhash: Keypair.generate().publicKey.toBase58(),
+  }).add(SystemProgram.transfer({
+    fromPubkey: creator.publicKey,
+    toPubkey: new PublicKey(poolAddress),
+    lamports: 1,
+  }));
+  withdrawalTransaction.sign(creator);
+  const signedTransaction = withdrawalTransaction.serialize().toString('base64');
+  const signedMessage = withdrawalTransaction.compileMessage();
   const withdrawal = await prisma.withdrawal.create({
     data: {
       userWallet: creatorWallet,
@@ -95,37 +109,45 @@ integrationTest('PostgreSQL persists pool filtering and confirmed withdrawal sta
       lpTokenAmount: 1,
       userAmount: 0.9,
       platformFee: 0.1,
+      transactionMessageHash: createHash('sha256')
+        .update(withdrawalTransaction.compileMessage().serialize())
+        .digest('hex'),
       status: 'pending',
     },
   });
   withdrawalId = withdrawal.id;
 
   const connection = {
-    getParsedTransaction: async () => ({
-      meta: { err: null },
-      transaction: {
-        message: {
-          accountKeys: [
-            { pubkey: { toBase58: () => creatorWallet }, signer: true },
-            { pubkey: { toBase58: () => poolAddress }, signer: false },
-          ],
-        },
-      },
-    }),
+    rpcEndpoint: 'https://api.devnet.solana.com',
+    getAccountInfo: async () => ({}),
+    getTransaction: async () => ({ transaction: { message: signedMessage }, meta: { err: null } }),
   } as unknown as Connection;
   const withdrawalResponse = responseRecorder();
   await createUpdateWithdrawalResultHandler(prisma, connection)(
-    request({ body: { withdrawalId, userWallet: creatorWallet, txHash: `${runId}-tx` } }),
+    request({ body: { withdrawalId, userWallet: creatorWallet, signedTransaction } }),
     withdrawalResponse.res,
   );
 
   assert.equal(withdrawalResponse.result.statusCode, 200);
+  assert.ok(withdrawalTransaction.signature);
+  const txHash = bs58.encode(withdrawalTransaction.signature!);
+  assert.deepEqual(withdrawalResponse.result.body, {
+    success: true,
+    status: 'pending',
+    txHash,
+  });
+
+  await createUpdateWithdrawalResultHandler(prisma, connection)(
+    request({ body: { withdrawalId, userWallet: creatorWallet, txHash } }),
+    withdrawalResponse.res,
+  );
+  assert.equal(withdrawalResponse.result.statusCode, 200);
   assert.deepEqual(withdrawalResponse.result.body, {
     success: true,
     status: 'completed',
-    txHash: `${runId}-tx`,
+    txHash,
   });
   const persistedWithdrawal = await prisma.withdrawal.findUnique({ where: { id: withdrawalId } });
   assert.equal(persistedWithdrawal?.status, 'completed');
-  assert.equal(persistedWithdrawal?.txHash, `${runId}-tx`);
+  assert.equal(persistedWithdrawal?.txHash, txHash);
 });

@@ -32,7 +32,8 @@ function sendError(res: Response, error: unknown, context: string): Response {
     return res.status(error.status).json({ success: false, error: error.message });
   }
   const errorId = randomUUID();
-  logger.error({ err: error, errorId }, context);
+  // Auth storage failures can contain Redis URL details; keep logs credential-safe.
+  logger.error({ errorName: error instanceof Error ? error.name : 'UnknownError', errorId }, context);
   return res.status(500).json({ success: false, error: 'No se pudo completar la identificación de la wallet.', errorId });
 }
 

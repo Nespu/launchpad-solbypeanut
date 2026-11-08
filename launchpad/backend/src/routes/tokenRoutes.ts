@@ -2,6 +2,8 @@ import {
   createToken,
   submitTransaction,
   withdrawLiquidity,
+  prepareLpBurn,
+  prepareLpLock,
   createPool,
   submitPoolTransaction,
   getLpBalance,
@@ -16,6 +18,7 @@ import { createRateLimit, getRedisClient } from '../middleware/rateLimit';
 import { createWalletSessionResolver } from '../controllers/walletAuthController';
 import { createWalletAuthService } from '../services/walletAuth';
 import { config } from '../utils/config';
+import { createPumpToken, submitPumpTokenTransaction } from '../controllers/pumpTokenController';
 
 export const walletAuthService = createWalletAuthService(getRedisClient(), {
   allowedOrigins: config.corsOrigins,
@@ -25,8 +28,12 @@ export const resolveWalletSession = createWalletSessionResolver(walletAuthServic
 
 export const tokenRouter = createTokenRouter({
   createToken,
+  createPumpToken,
+  submitPumpTokenTransaction,
   submitTransaction,
   withdrawLiquidity,
+  prepareLpBurn,
+  prepareLpLock,
   createPool,
   submitPoolTransaction,
   getLpBalance,

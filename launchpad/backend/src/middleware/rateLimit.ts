@@ -17,7 +17,8 @@ export function getRedisClient(): Redis {
       enableOfflineQueue: false,
     });
     redis.on('error', (error) => {
-      logger.error({ message: error.message }, 'Rate limit store connection error');
+      // Redis URLs may contain credentials. Do not put the error message in logs.
+      logger.error({ errorName: error.name }, 'Rate limit store connection error');
     });
   }
 
@@ -92,7 +93,7 @@ export function createRateLimit(
 
       return next();
     } catch (error) {
-      logger.error({ err: error }, 'Rate limit store unavailable');
+      logger.error({ errorName: error instanceof Error ? error.name : 'UnknownError' }, 'Rate limit store unavailable');
       return res.status(503).json({ success: false, error: 'La protección temporalmente no está disponible. Intenta de nuevo.' });
     }
   };

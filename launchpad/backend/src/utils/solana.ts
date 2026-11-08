@@ -5,6 +5,9 @@ import { config } from "./config";
 export const connection = new Connection(config.rpcEndpoint, {
   commitment: "confirmed",
   wsEndpoint: config.rpcWebsocket || undefined,
+  // Let the calling route handle 429s once. web3.js's automatic retry burst
+  // can otherwise amplify Devnet throttling across Raydium SDK requests.
+  disableRetryOnRateLimit: true,
 });
 
 // The server wallet only pays network/compute fees for building transactions.

@@ -6,11 +6,15 @@ import { createGetMyTokensHandler, MY_TOKENS_LIMIT } from '../src/controllers/to
 const VALID_WALLET = 'EdCyzRV1boyJJEjR7rBLLcRzTKQ2nGsrv4LDHuLMevMo';
 
 const ALLOWED_FIELDS = [
+  'bondingCurveAddress',
   'createdAt',
+  'holderReward',
   'imageUrl',
+  'launchPlatform',
   'mintAddress',
   'name',
   'poolAddress',
+  'poolQuoteMint',
   'status',
   'symbol',
 ];
@@ -93,6 +97,9 @@ test('session wallet query orders by date and returns only allowed fields', asyn
       symbol: 'TST',
       imageUrl: 'https://example.com/image.png',
       poolAddress: null,
+      poolQuoteMint: 'So11111111111111111111111111111111111111112',
+      launchPlatform: 'RAYDIUM',
+      bondingCurveAddress: null,
       status: 'completed',
       createdAt: new Date('2026-10-10T07:06:11.000Z'),
     },

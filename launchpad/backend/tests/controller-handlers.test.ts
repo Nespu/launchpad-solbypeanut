@@ -1,19 +1,25 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
+import bs58 from 'bs58';
 import type { PrismaClient } from '@prisma/client';
-import type { Connection } from '@solana/web3.js';
+import { PublicKey, type Connection } from '@solana/web3.js';
 import type { Request, Response } from 'express';
 import { Prisma } from '@prisma/client';
 import {
   createGetMyPoolsHandler,
   createUpdateWithdrawalResultHandler,
 } from '../src/controllers/tokenControllerHandlers';
+import { createGetWalletHistoryHandler } from '../src/controllers/walletHistoryController';
 import { confirmSignedTransaction, createTokenIdempotently } from '../src/services/tokenSubmission';
 import { PublicError } from '../src/utils/publicError';
 
 const wallet = '11111111111111111111111111111111';
 const otherWallet = 'Vote111111111111111111111111111111111111111';
 const poolAddress = 'SysvarRent111111111111111111111111111111111';
+const withdrawalSignature = bs58.encode(new Uint8Array(64).fill(1));
+const withdrawalMessageBytes = Uint8Array.from([1, 2, 3, 4]);
+const withdrawalMessageHash = createHash('sha256').update(withdrawalMessageBytes).digest('hex');
 
 function responseRecorder(locals: Record<string, unknown> = {}) {
   const result: { statusCode?: number; body?: unknown } = {};
@@ -24,6 +30,7 @@ function responseRecorder(locals: Record<string, unknown> = {}) {
       result.statusCode = code;
       return this;
     },
+    setHeader() { return this; },
     json(body: unknown) {
       result.body = body;
       return this;
@@ -31,6 +38,93 @@ function responseRecorder(locals: Record<string, unknown> = {}) {
   };
   return { result, res: res as unknown as Response };
 }
+
+function historySwapRow(index: number) {
+  return {
+    id: `swap-${index}`,
+    signature: bs58.encode(new Uint8Array(64).fill((index % 250) + 1)),
+    mintAddress: poolAddress,
+    poolAddress,
+    venue: 'RAYDIUM',
+    side: 'buy',
+    tokenAmountRaw: '1',
+    solAmountLamports: '1',
+    quoteAmountRaw: '1',
+    quoteMint: 'So11111111111111111111111111111111111111112',
+    quoteDecimals: 9,
+    tokenDecimals: 6,
+    slot: String(1000 - index),
+    blockTime: null,
+    networkFeeLamports: '5000',
+    createdAt: new Date(0),
+  };
+}
+
+function walletHistoryPrisma(queryRaw: (...args: unknown[]) => Promise<unknown>) {
+  return fakePrisma({
+    token: { findMany: async () => [] },
+    withdrawal: { findMany: async () => [] },
+    $queryRaw: queryRaw,
+  });
+}
+
+function historyResponseRecorder() {
+  const result: { statusCode?: number; body?: unknown; headers: Record<string, string> } = { headers: {} };
+  const res = {
+    locals: {},
+    status(code: number) { result.statusCode = code; return this; },
+    setHeader(name: string, value: string) { result.headers[name] = value; return this; },
+    json(body: unknown) { result.body = body; return this; },
+  };
+  return { result, res: res as unknown as Response };
+}
+
+test('wallet history swap cursor pages older rows and reports when more remain', async () => {
+  let capturedValues: unknown[] = [];
+  let capturedQuery = '';
+  const handler = createGetWalletHistoryHandler(walletHistoryPrisma(async (strings, ...values) => {
+    capturedQuery = Array.isArray(strings) ? strings.join('?') : '';
+    capturedValues = values;
+    return Array.from({ length: 201 }, (_, index) => historySwapRow(index));
+  }), async () => wallet);
+  const { result, res } = historyResponseRecorder();
+
+  await handler({ query: {} } as unknown as Request, res, () => undefined);
+
+  const body = result.body as { swaps: Array<{ slot: string }>; swapsHasMore: boolean };
+  assert.equal(result.statusCode, 200);
+  assert.equal(body.swaps.length, 200);
+  assert.equal(body.swapsHasMore, true);
+  assert.equal(body.swaps[199].slot, '801');
+  assert.match(capturedQuery, /ORDER BY "slot" DESC, "signature" DESC/);
+  assert.deepEqual(capturedValues, [wallet, 201]);
+});
+
+test('wallet history cursor is parameterized and rejects incomplete cursors', async () => {
+  const signature = bs58.encode(new Uint8Array(64).fill(8));
+  let queryCount = 0;
+  let capturedValues: unknown[] = [];
+  const handler = createGetWalletHistoryHandler(walletHistoryPrisma(async (strings, ...values) => {
+    queryCount += 1;
+    capturedValues = values;
+    assert.match(Array.isArray(strings) ? strings.join('?') : '', /"slot" < \?::bigint/);
+    return [];
+  }), async () => wallet);
+
+  const invalid = historyResponseRecorder();
+  await handler({ query: { beforeSlot: '12' } } as unknown as Request, invalid.res, () => undefined);
+  assert.equal(invalid.result.statusCode, 400);
+  assert.equal(queryCount, 0);
+
+  const valid = historyResponseRecorder();
+  await handler({ query: { beforeSlot: '12', beforeSignature: signature } } as unknown as Request, valid.res, () => undefined);
+  assert.equal(valid.result.statusCode, 200);
+  assert.ok(capturedValues.includes(wallet));
+  assert.ok(capturedValues.includes('12'));
+  assert.ok(capturedValues.includes(signature));
+  assert.ok(capturedValues.includes(201));
+  assert.equal(queryCount, 1);
+});
 
 function request(input: { query?: Record<string, unknown>; body?: Record<string, unknown> }) {
   return input as unknown as Request;
@@ -151,7 +245,7 @@ test('getMyPools canonicalizes wallet and asks Prisma to exclude missing and pen
   assert.deepEqual(result.body, { success: true, pools });
   assert.deepEqual(query, {
     where: { creatorWallet: wallet, poolAddress: { not: null, notIn: ['pending', ''] } },
-    select: { mintAddress: true, name: true, symbol: true, imageUrl: true, poolAddress: true, createdAt: true },
+    select: { mintAddress: true, name: true, symbol: true, imageUrl: true, poolAddress: true, poolQuoteMint: true, createdAt: true },
     orderBy: { createdAt: 'desc' },
   });
 });
@@ -180,7 +274,7 @@ test('withdrawal result rejects a wallet that does not own the record', async ()
     }),
     {} as Connection,
   );
-  const { result, res } = responseRecorder();
+  const { result, res } = responseRecorder({ walletIdentity: wallet });
 
   await handler(request({ body: { withdrawalId: 'withdrawal-1', userWallet: wallet, txHash: 'tx' } }), res);
 
@@ -188,66 +282,79 @@ test('withdrawal result rejects a wallet that does not own the record', async ()
   assert.equal(updated, false);
 });
 
-test('withdrawal result marks a pending cancellation as failed', async () => {
-  let update: unknown;
+test('withdrawal result cancels an unsigned pending preparation', async () => {
+  let updateMany: unknown;
   const handler = createUpdateWithdrawalResultHandler(
     fakePrisma({
       withdrawal: {
-        findUnique: async () => ({ id: 'withdrawal-1', userWallet: wallet, poolAddress, status: 'pending', txHash: null }),
-        update: async (args: unknown) => { update = args; },
+        findUnique: async () => ({ id: 'withdrawal-1', userWallet: wallet, poolAddress, status: 'pending', verifiedTxHash: null }),
+        updateMany: async (args: unknown) => { updateMany = args; return { count: 1 }; },
       },
     }),
     {} as Connection,
   );
-  const { result, res } = responseRecorder();
+  const { result, res } = responseRecorder({ walletIdentity: wallet });
 
-  await handler(request({ body: { withdrawalId: 'withdrawal-1', userWallet: wallet } }), res);
+  await handler(request({ body: { withdrawalId: 'withdrawal-1', userWallet: wallet, cancel: true } }), res);
 
   assert.equal(result.statusCode, 200);
-  assert.deepEqual(result.body, { success: true, status: 'failed' });
-  assert.deepEqual(update, { where: { id: 'withdrawal-1' }, data: { status: 'failed' } });
+  assert.deepEqual(result.body, { success: true, status: 'cancelled' });
+  assert.deepEqual(updateMany, {
+    where: { id: 'withdrawal-1', status: 'pending', verifiedTxHash: null },
+    data: { status: 'cancelled' },
+  });
 });
 
 test('withdrawal result marks on-chain failure as failed with its transaction signature', async () => {
   let update: unknown;
   const connection = {
-    getParsedTransaction: async () => ({
+    getAccountInfo: async () => ({}),
+    getTransaction: async () => ({
       meta: { err: { InstructionError: [0, 'Custom'] } },
-      transaction: { message: { accountKeys: [] } },
+      transaction: {
+        message: {
+          staticAccountKeys: [new PublicKey(wallet), new PublicKey(poolAddress)],
+          header: { numRequiredSignatures: 1 },
+          serialize: () => withdrawalMessageBytes,
+        },
+      },
     }),
   } as unknown as Connection;
   const handler = createUpdateWithdrawalResultHandler(
     fakePrisma({
       withdrawal: {
-        findUnique: async () => ({ id: 'withdrawal-1', userWallet: wallet, poolAddress, status: 'pending', txHash: null }),
-        update: async (args: unknown) => { update = args; },
+        findUnique: async () => ({ id: 'withdrawal-1', userWallet: wallet, poolAddress, status: 'pending', txHash: null, verifiedTxHash: withdrawalSignature, transactionMessageHash: withdrawalMessageHash }),
+        updateMany: async (args: unknown) => { update = args; return { count: 1 }; },
       },
     }),
     connection,
   );
-  const { result, res } = responseRecorder();
+  const { result, res } = responseRecorder({ walletIdentity: wallet });
 
-  await handler(request({ body: { withdrawalId: 'withdrawal-1', userWallet: wallet, txHash: 'tx-failed' } }), res);
+  await handler(request({ body: { withdrawalId: 'withdrawal-1', userWallet: wallet, txHash: withdrawalSignature } }), res);
 
   assert.equal(result.statusCode, 200);
-  assert.deepEqual(result.body, { success: true, status: 'failed', txHash: 'tx-failed' });
-  assert.deepEqual(update, { where: { id: 'withdrawal-1' }, data: { status: 'failed', txHash: 'tx-failed' } });
+  assert.deepEqual(result.body, { success: true, status: 'failed', txHash: withdrawalSignature });
+  assert.deepEqual(update, {
+    where: { id: 'withdrawal-1', status: { in: ['pending', 'expired_unverified'] }, verifiedTxHash: withdrawalSignature },
+    data: { status: 'failed', txHash: withdrawalSignature },
+  });
 });
 
 test('withdrawal result completes only after confirmed transaction includes signer and pool', async () => {
   let update: unknown;
   let fetchedSignature: string | undefined;
   const connection = {
-    getParsedTransaction: async (signature: string) => {
+    getAccountInfo: async () => ({}),
+    getTransaction: async (signature: string) => {
       fetchedSignature = signature;
       return {
         meta: { err: null },
         transaction: {
           message: {
-            accountKeys: [
-              { pubkey: { toBase58: () => wallet }, signer: true },
-              { pubkey: { toBase58: () => poolAddress }, signer: false },
-            ],
+            staticAccountKeys: [new PublicKey(wallet), new PublicKey(poolAddress)],
+            header: { numRequiredSignatures: 1 },
+            serialize: () => withdrawalMessageBytes,
           },
         },
       };
@@ -256,20 +363,23 @@ test('withdrawal result completes only after confirmed transaction includes sign
   const handler = createUpdateWithdrawalResultHandler(
     fakePrisma({
       withdrawal: {
-        findUnique: async () => ({ id: 'withdrawal-1', userWallet: wallet, poolAddress, status: 'pending', txHash: null }),
-        update: async (args: unknown) => { update = args; },
+        findUnique: async () => ({ id: 'withdrawal-1', userWallet: wallet, poolAddress, status: 'pending', txHash: null, verifiedTxHash: withdrawalSignature, transactionMessageHash: withdrawalMessageHash }),
+        updateMany: async (args: unknown) => { update = args; return { count: 1 }; },
       },
     }),
     connection,
   );
-  const { result, res } = responseRecorder();
+  const { result, res } = responseRecorder({ walletIdentity: wallet });
 
-  await handler(request({ body: { withdrawalId: 'withdrawal-1', userWallet: wallet, txHash: 'tx-ok' } }), res);
+  await handler(request({ body: { withdrawalId: 'withdrawal-1', userWallet: wallet, txHash: withdrawalSignature } }), res);
 
   assert.equal(result.statusCode, 200);
-  assert.deepEqual(result.body, { success: true, status: 'completed', txHash: 'tx-ok' });
-  assert.equal(fetchedSignature, 'tx-ok');
-  assert.deepEqual(update, { where: { id: 'withdrawal-1' }, data: { status: 'completed', txHash: 'tx-ok' } });
+  assert.deepEqual(result.body, { success: true, status: 'completed', txHash: withdrawalSignature });
+  assert.equal(fetchedSignature, withdrawalSignature);
+  assert.deepEqual(update, {
+    where: { id: 'withdrawal-1', status: { in: ['pending', 'expired_unverified'] }, verifiedTxHash: withdrawalSignature },
+    data: { status: 'completed', txHash: withdrawalSignature },
+  });
 });
 
 test('withdrawal result is idempotent for an already completed transaction', async () => {
@@ -281,13 +391,13 @@ test('withdrawal result is idempotent for an already completed transaction', asy
   const handler = createUpdateWithdrawalResultHandler(
     fakePrisma({
       withdrawal: {
-        findUnique: async () => ({ id: 'withdrawal-1', userWallet: wallet, poolAddress, status: 'completed', txHash: 'tx-existing' }),
+        findUnique: async () => ({ id: 'withdrawal-1', userWallet: wallet, poolAddress, status: 'completed', txHash: 'tx-existing', transactionMessageHash: withdrawalMessageHash }),
         update: async () => { updated = true; },
       },
     }),
     connection,
   );
-  const { result, res } = responseRecorder();
+  const { result, res } = responseRecorder({ walletIdentity: wallet });
 
   await handler(request({ body: { withdrawalId: 'withdrawal-1', userWallet: wallet, txHash: 'tx-existing' } }), res);
 
